@@ -143,29 +143,21 @@ class CathNavGuidelet(Guidelet):
   def __init__(self, parent, logic, configurationName='Default'):
     logging.debug('CathNavGuidelet.__init__')
     Guidelet.__init__(self, parent, logic, configurationName)
-
     moduleDirectoryPath = slicer.modules.cathnav.path.replace('CathNav.py', '')
 
     # Set up main frame.
-
     self.sliceletDockWidget.setObjectName('CathNavPanel')
     self.sliceletDockWidget.setWindowTitle('CathNav')
     self.mainWindow.setWindowTitle('HDR Catheter navigation')
     self.mainWindow.windowIcon = qt.QIcon(moduleDirectoryPath + '/Resources/Icons/CathNav.png')
     
-    self.pivotCalibrationLogic=slicer.modules.pivotcalibration.logic()
-    
-    # Set needle and guide transforms and models
-    self.tumorMarkups_Needle = None
     self.tumorMarkups_NeedleObserver = None
-
-    self.chestwallMarkups_Chest = None
     self.chestwallMarkups_ChestObserver = None
-    
-    # create the thread for reconstruction
+    self.listWirePoints_NeedleObserver = None
+    self.pathCount = 0
     self.reconstructionThread = None
-    self.wirePoints_Needle = None
-    self.wirePoints_NeedleObserver = None
+    # self.wirePoints_Needle
+    # self.wirePoints_NeedleObserver
 
     self.setupScene()
 
@@ -179,155 +171,54 @@ class CathNavGuidelet(Guidelet):
   def cleanup(self):#common
     Guidelet.cleanup(self)
     logging.debug('cleanup')
-    self.setAndObserveTumorMarkupsNode(None)
+    if self.tumorMarkups_NeedleObserver:
+      self.tumorMarkups_Needle.RemoveObserver(self.tumorMarkups_NeedleObserver)
+    if self.chestwallMarkups_Chest:
+      self.chestwallMarkups_Chest.RemoveObserver(self.chestwallMarkups_ChestObserver)
     
   def setupScene(self): #applet specific
     logging.debug('setupScene')
-    
-    # 3D view
 
-    logging.debug('3D View')
-    
+    logging.debug('Setup 3D View')
     view = slicer.util.getNode("View1")
     view.SetBoxVisible(False)
     view.SetAxisLabelsVisible(False)
     
-    # Transforms
+    logging.debug('Setup Transforms')
+    self.guideTipToGuide = self.initializeLinearTransform('GuideTipToGuide')
+    self.loadLinearTransformFromSettings(self.guideTipToGuide)
+    self.needleTipToNeedle = self.initializeLinearTransform('NeedleTipToNeedle')
+    self.loadLinearTransformFromSettings(self.needleTipToNeedle)
+    self.guideModelToGuideTip = self.initializeLinearTransform('GuideModelToGuideTip')
+    guideModelToGuideTipMatrix = [ 0, 1, 0, 0,
+                                   0, 0, 1, 0,
+                                   1, 0, 0, 0,
+                                   0, 0, 0, 1 ]
+    self.setLinearTransform(self.guideModelToGuideTip, guideModelToGuideTipMatrix)
+    self.guideCameraToGuideModel = self.initializeLinearTransform('GuideCameraToGuideModel')
+    guideCameraToGuideModelMatrix = [ 0, 1, 0, 0,
+                                      1, 0, 0, 0,
+                                      0, 0,-1, 0,
+                                      0, 0, 0, 1 ]
+    self.setLinearTransform(self.guideCameraToGuideModel, guideCameraToGuideModelMatrix)      
+    self.needleModelToNeedleTip = self.initializeLinearTransform('NeedleModelToNeedleTip')
+    needleModelToNeedleTipMatrix = [ 0, 1, 0, 0,
+                                     0, 0, 1, 0,
+                                     1, 0, 0, 0,
+                                     0, 0, 0, 1 ]
+    self.setLinearTransform(self.needleModelToNeedleTip, needleModelToNeedleTipMatrix)
+    self.referenceToRas = self.initializeLinearTransform('ChestToRas')
+    self.needleToGuide = self.initializeLinearTransform('NeedleToGuide')
+    self.planToNeedle = self.initializeLinearTransform('PlanToNeedle')
+    self.gridToPlan = self.initializeLinearTransform('GridToPlan')
+    self.gridCameraToGrid = self.initializeLinearTransform('GridCameraToGrid')
+    self.guideToNeedle = self.initializeLinearTransform('GuideToNeedle')
+    self.needleToGuide = self.initializeLinearTransform('NeedleToGuide')
+    self.guideToChest = self.initializeLinearTransform('GuideToChest')
+    self.wireToChest = self.initializeLinearTransform('WireToChest')
+    self.needleToChest = self.initializeLinearTransform('NeedleToChest')
 
-    logging.debug('Create transforms')
-
-    self.guideTipToGuide = slicer.util.getNode('GuideTipToGuide')
-    if not self.guideTipToGuide:
-      self.guideTipToGuide=slicer.vtkMRMLLinearTransformNode()
-      self.guideTipToGuide.SetName("GuideTipToGuide")
-      m = self.logic.readTransformFromSettings('GuideTipToGuide', self.configurationName) 
-      if m:
-        self.guideTipToGuide.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.guideTipToGuide)
-
-    self.guideModelToGuideTip = slicer.util.getNode('GuideModelToGuideTip')
-    if not self.guideModelToGuideTip:
-      self.guideModelToGuideTip=slicer.vtkMRMLLinearTransformNode()
-      self.guideModelToGuideTip.SetName("GuideModelToGuideTip")
-      m = vtk.vtkMatrix4x4()
-      m.SetElement( 0, 0, 0 )
-      m.SetElement( 0, 1, 1 )
-      m.SetElement( 1, 1, 0 )
-      m.SetElement( 1, 2, 1 )
-      m.SetElement( 2, 2, 0 )
-      m.SetElement( 2, 0, 1 )
-      self.guideModelToGuideTip.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.guideModelToGuideTip)
-
-    self.guideCameraToGuideModel = slicer.util.getNode('GuideCameraToGuideModel')
-    if not self.guideCameraToGuideModel:
-      self.guideCameraToGuideModel=slicer.vtkMRMLLinearTransformNode()
-      self.guideCameraToGuideModel.SetName("GuideCameraToGuideModel")
-      m = vtk.vtkMatrix4x4()
-      m.SetElement( 0, 0, 0 )
-      m.SetElement( 0, 1, 1 )
-      m.SetElement( 1, 0, 1 )
-      m.SetElement( 1, 1, 0 )
-      m.SetElement( 2, 2, -1 )
-      self.guideCameraToGuideModel.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.guideCameraToGuideModel)
-
-    self.needleTipToNeedle = slicer.util.getNode('NeedleTipToNeedle')
-    if not self.needleTipToNeedle:
-      self.needleTipToNeedle=slicer.vtkMRMLLinearTransformNode()
-      self.needleTipToNeedle.SetName("NeedleTipToNeedle")
-      m = self.logic.readTransformFromSettings('NeedleTipToNeedle', self.configurationName) 
-      if m:
-        self.needleTipToNeedle.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.needleTipToNeedle)      
-      
-    self.needleModelToNeedleTip = slicer.util.getNode('NeedleModelToNeedleTip')
-    if not self.needleModelToNeedleTip:
-      self.needleModelToNeedleTip=slicer.vtkMRMLLinearTransformNode()
-      self.needleModelToNeedleTip.SetName("NeedleModelToNeedleTip")
-      m = vtk.vtkMatrix4x4()
-      m.SetElement( 0, 0, 0 )
-      m.SetElement( 0, 1, 1 )
-      m.SetElement( 1, 1, 0 )
-      m.SetElement( 1, 2, 1 )
-      m.SetElement( 2, 2, 0 )
-      m.SetElement( 2, 0, 1 )
-      self.needleModelToNeedleTip.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.needleModelToNeedleTip)
-
-    # Guidelet assumes that the top transform in the hierarchy is called referenceToRas.
-    # for all intents and purposes, chest == reference
-    # so this is effectively "chestToRas"
-    self.referenceToRas = slicer.util.getNode('ChestToRas')
-    if not self.referenceToRas:
-      self.referenceToRas=slicer.vtkMRMLLinearTransformNode()
-      self.referenceToRas.SetName("ChestToRas")
-      slicer.mrmlScene.AddNode(self.referenceToRas)
-
-    self.needleToGuide = slicer.util.getNode('NeedleToGuide')
-    if not self.needleToGuide:
-      self.needleToGuide=slicer.vtkMRMLLinearTransformNode()
-      self.needleToGuide.SetName("NeedleToGuide")
-      slicer.mrmlScene.AddNode(self.needleToGuide)
-      
-    self.planToNeedle = slicer.util.getNode('PlanToNeedle')
-    if not self.planToNeedle:
-      self.planToNeedle=slicer.vtkMRMLLinearTransformNode()
-      self.planToNeedle.SetName("PlanToNeedle")
-      slicer.mrmlScene.AddNode(self.planToNeedle)
-      
-    self.gridToPlan = slicer.util.getNode('GridToPlan')
-    if not self.gridToPlan:
-      self.gridToPlan=slicer.vtkMRMLLinearTransformNode()
-      self.gridToPlan.SetName("GridToPlan")
-      slicer.mrmlScene.AddNode(self.gridToPlan)
-      
-    self.gridCameraToGrid = slicer.util.getNode('GridCameraToGrid')
-    if not self.gridCameraToGrid:
-      self.gridCameraToGrid=slicer.vtkMRMLLinearTransformNode()
-      self.gridCameraToGrid.SetName("GridCameraToGrid")
-      slicer.mrmlScene.AddNode(self.gridCameraToGrid)
-
-    # Create transforms that will be updated through OpenIGTLink
-
-    # calibration
-    self.guideToNeedle = slicer.util.getNode('GuideToNeedle')
-    if not self.guideToNeedle:
-      self.guideToNeedle=slicer.vtkMRMLLinearTransformNode()
-      self.guideToNeedle.SetName("GuideToNeedle")
-      slicer.mrmlScene.AddNode(self.guideToNeedle)
-
-    # calibration
-    self.needleToGuide = slicer.util.getNode('NeedleToGuide')
-    if not self.needleToGuide:
-      self.needleToGuide=slicer.vtkMRMLLinearTransformNode()
-      self.needleToGuide.SetName("NeedleToGuide")
-      slicer.mrmlScene.AddNode(self.needleToGuide)
-
-    # rendering
-    self.guideToChest = slicer.util.getNode('GuideToChest')
-    if not self.guideToChest:
-      self.guideToChest = slicer.vtkMRMLLinearTransformNode()
-      self.guideToChest.SetName("GuideToChest")
-      slicer.mrmlScene.AddNode(self.guideToChest)
-
-    # rendering
-    self.wireToChest = slicer.util.getNode('WireToChest')
-    if not self.wireToChest:
-      self.wireToChest=slicer.vtkMRMLLinearTransformNode()
-      self.wireToChest.SetName("WireToChest")
-      slicer.mrmlScene.AddNode(self.wireToChest)
-
-    # rendering
-    self.needleToChest = slicer.util.getNode('NeedleToChest')
-    if not self.needleToChest:
-      self.needleToChest=slicer.vtkMRMLLinearTransformNode()
-      self.needleToChest.SetName("NeedleToChest")
-      slicer.mrmlScene.AddNode(self.needleToChest)
-
-    # Models
-    logging.debug('Create models')
-
+    logging.debug('Setup Models')
     self.guideModel_GuideTip = slicer.util.getNode('GuideModel')
     if not self.guideModel_GuideTip:
       moduleDirectoryPath = slicer.modules.cathnav.path.replace('CathNav.py', '')
@@ -335,7 +226,6 @@ class CathNavGuidelet(Guidelet):
       self.guideModel_GuideTip=slicer.util.getNode(pattern="catheterGuide")
       self.guideModel_GuideTip.GetDisplayNode().SetColor(1.0, 1.0, 0)
       self.guideModel_GuideTip.SetName("GuideModel")
-
     self.needleModel_NeedleTip = slicer.util.getNode('NeedleModel')
     if not self.needleModel_NeedleTip:
       slicer.modules.createmodels.logic().CreateNeedle(80,0.5,0,0)
@@ -343,7 +233,6 @@ class CathNavGuidelet(Guidelet):
       self.needleModel_NeedleTip.GetDisplayNode().SetColor(0.333333, 1.0, 1.0)
       self.needleModel_NeedleTip.SetName("NeedleModel")
       self.needleModel_NeedleTip.GetDisplayNode().SliceIntersectionVisibilityOn()
-
     self.wireModel_Wire = slicer.util.getNode('WireModel')
     if not self.wireModel_Wire:
       slicer.modules.createmodels.logic().CreateSphere(0.75)
@@ -352,62 +241,53 @@ class CathNavGuidelet(Guidelet):
       self.wireModel_Wire.SetName("WireModel")
       self.wireModel_Wire.GetDisplayNode().SliceIntersectionVisibilityOn()
     
-    # Guidelet
+    logging.debug('Setup Guidelet')
     Guidelet.setupScene(self)
+    
+    logging.debug('Setup Calibration')
+    self.needleTipMarkups_Guide = self.initializeFiducialList('NeedleTipMarkups_Guide')
 
-    # Create surface from point set
-    logging.debug('Create surface from point set')
-    # - tumor model
-    self.tumorModel_Needle = slicer.util.getNode('TumorModel')
+    logging.debug('Setup Model Making - Seroma')
+    self.tumorMarkups_Needle = self.initializeFiducialList('SeromaMarkups_Needle')
+    self.tumorMarkups_NeedleObserver = self.setAndObserveNode(self.tumorMarkups_Needle, self.tumorMarkups_NeedleObserver, self.onTumorMarkupsNodeModified)
+    self.tumorModel_Needle = slicer.util.getNode('SeromaModel')
     if not self.tumorModel_Needle:
       self.tumorModel_Needle = slicer.vtkMRMLModelNode()
-      self.tumorModel_Needle.SetName("TumorModel")
-      sphereSource = vtk.vtkSphereSource()
-      sphereSource.SetRadius(0.001)
-      self.tumorModel_Needle.SetPolyDataConnection(sphereSource.GetOutputPort())      
+      self.tumorModel_Needle.SetName("SeromaModel")
       slicer.mrmlScene.AddNode(self.tumorModel_Needle)
-      # Add display node
       modelDisplayNode = slicer.vtkMRMLModelDisplayNode()
       modelDisplayNode.SetColor(1,0,0) # Red
       modelDisplayNode.BackfaceCullingOff()
       modelDisplayNode.SliceIntersectionVisibilityOn()
       modelDisplayNode.SetSliceIntersectionThickness(4)
-      modelDisplayNode.SetOpacity(0.3) # Between 0-1, 1 being opaque
+      modelDisplayNode.SetOpacity(0.3)
       slicer.mrmlScene.AddNode(modelDisplayNode)
       self.tumorModel_Needle.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
-    tumorMarkups_Needle = self.initializeFiducialList('T')
-    self.setAndObserveTumorMarkupsNode(tumorMarkups_Needle)
-    # - chest wall model
+    logging.debug('Setup Model Making - Chestwall')
+    self.chestwallMarkups_Chest = self.initializeFiducialList('ChestwallMarkups_Chest')
+    self.chestwallMarkups_ChestObserver = self.setAndObserveNode(self.chestwallMarkups_Chest, self.chestwallMarkups_ChestObserver, self.onChestwallMarkupsNodeModified)
     self.chestwallModel_Chest = slicer.util.getNode('ChestWallModel')
     if not self.chestwallModel_Chest:
       self.chestwallModel_Chest = slicer.vtkMRMLModelNode()
       self.chestwallModel_Chest.SetName("ChestWallModel")
-      sphereSource = vtk.vtkSphereSource()
-      sphereSource.SetRadius(0.001)
-      self.chestwallModel_Chest.SetPolyDataConnection(sphereSource.GetOutputPort())      
       slicer.mrmlScene.AddNode(self.chestwallModel_Chest)
-      # Add display node
       modelDisplayNode = slicer.vtkMRMLModelDisplayNode()
       modelDisplayNode.SetColor(0.75,0.75,0.75) # Grey
       modelDisplayNode.BackfaceCullingOff()
       modelDisplayNode.SliceIntersectionVisibilityOn()
       modelDisplayNode.SetSliceIntersectionThickness(4)
-      modelDisplayNode.SetOpacity(0.3) # Between 0-1, 1 being opaque
+      modelDisplayNode.SetOpacity(0.3)
       slicer.mrmlScene.AddNode(modelDisplayNode)
       self.chestwallModel_Chest.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
-    chestwallMarkups_Chest = self.initializeFiducialList('C')
-    self.setAndObserveChestwallMarkupsNode(chestwallMarkups_Chest)
     
-    # Calibration
-    self.needleTipMarkups_Guide = self.initializeFiducialList('NeedleTipMarkups_Guide')
-
-    # Reconstruction
+    logging.debug('Setup Catheter Path Reconstruction')
     self.wirePoints_Needle = self.initializeFiducialList('WirePoints_Needle')
-    self.wirePoints_Needle.SetDisplayVisibility(0)
     self.pathCount = 0
 
-    # Build transform tree
-    logging.debug('Set up transform tree')
+    logging.debug('Setup Transform Tree')
+    # Guidelet assumes that the top transform in the hierarchy is called referenceToRas.
+    # for all intents and purposes, chest == reference
+    # so this is effectively "chestToRas"
     self.wireToChest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     self.wireModel_Wire.SetAndObserveTransformNodeID(self.wireToChest.GetID())
     self.guideToChest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
@@ -427,19 +307,66 @@ class CathNavGuidelet(Guidelet):
     self.chestwallModel_Chest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     self.chestwallMarkups_Chest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
 
-    # These are not used in rendering
-    #self.guideToNeedle.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
-    #self.needleToGuide.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
-    
     # Hide slice view annotations (patient name, scale, color bar, etc.) as they
     # decrease reslicing performance by 20%-100%
-    logging.debug('Hide slice view annotations')
+    logging.debug('Setup - Hide slice view annotations')
     import DataProbe
     dataProbeUtil=DataProbe.DataProbeLib.DataProbeUtil()
     dataProbeParameterNode=dataProbeUtil.getParameterNode()
     dataProbeParameterNode.SetParameter('showSliceViewAnnotations', '0')
 
+  def initializeLinearTransform(self,name):
+    logging.debug('initializeLinearTransform')
+    transform = slicer.util.getNode(name)
+    if not transform:
+      transform=slicer.vtkMRMLLinearTransformNode()
+      transform.SetName(name)
+      slicer.mrmlScene.AddNode(transform)
+    return transform
+    
+  def setLinearTransform(self,node,values):
+    logging.debug('setLinearTransform')
+    # array indexing is as follows (row major):
+    # [ 0,  1,  2,  3,
+    #   4,  5,  6,  7,
+    #   8,  9, 10, 11,
+    #  12, 13, 14, 15 ]
+    if not node:
+      logging.error('No node provided to set linear transform.')
+      return
+    if len(values) != 16:
+      logging.error('16 values are needed to set a linear transform.')
+      return
+    m = vtk.vtkMatrix4x4()
+    m.SetElement( 0, 0, values[0] )
+    m.SetElement( 0, 1, values[1] )
+    m.SetElement( 0, 2, values[2] )
+    m.SetElement( 0, 3, values[3] )
+    m.SetElement( 1, 0, values[4] )
+    m.SetElement( 1, 1, values[5] )
+    m.SetElement( 1, 2, values[6] )
+    m.SetElement( 1, 3, values[7] )
+    m.SetElement( 2, 0, values[8] )
+    m.SetElement( 2, 1, values[9] )
+    m.SetElement( 2, 2, values[10] )
+    m.SetElement( 2, 3, values[11] )
+    m.SetElement( 3, 0, values[12] )
+    m.SetElement( 3, 1, values[13] )
+    m.SetElement( 3, 2, values[14] )
+    m.SetElement( 3, 3, values[15] )
+    node.SetMatrixTransformToParent(m)
+    
+  def loadLinearTransformFromSettings(self,node):
+    logging.debug('loadLinearTransformFromSettings')
+    if not node:
+      logging.error('No node provided to set linear transform.')
+      return
+    m = self.logic.readTransformFromSettings(node.GetName(), self.configurationName)
+    if m:
+      node.SetMatrixTransformToParent(m)
+    
   def initializeFiducialList(self,name):
+    logging.debug('initializeFiducialList')
     fiducialList = slicer.util.getNode(name)
     if not fiducialList:
       fiducialList=slicer.vtkMRMLMarkupsFiducialNode()
@@ -447,6 +374,7 @@ class CathNavGuidelet(Guidelet):
       slicer.mrmlScene.AddNode(fiducialList)
       fiducialList.CreateDefaultDisplayNodes()
       fiducialList.GetDisplayNode().SetTextScale(0)
+      fiducialList.SetDisplayVisibility(0)
     return fiducialList
     
   def copyFiducialsFromListToList(self,sourceList,targetList):
@@ -845,12 +773,14 @@ class CathNavGuidelet(Guidelet):
     Guidelet.setupConnections(self)
 
     self.calibrationCollapsibleButton.connect('toggled(bool)', self.onCalibrationPanelToggled)
-    self.guidewireCollapsibleButton.connect('toggled(bool)', self.onGuidewirePanelToggled)
-    self.planningCollapsibleButton.connect('toggled(bool)', self.onPlanningPanelToggled)
-    self.navigationCollapsibleButton.connect('toggled(bool)', self.onNavigationPanelToggled)
-    self.reconstructionCollapsibleButton.connect('toggled(bool)', self.onReconstructionPanelToggled)
+    self.guidewireCollapsibleButton.connect('toggled(bool)', self.onCommon3DPanelToggled)
+    self.planningCollapsibleButton.connect('toggled(bool)', self.onCommon3DPanelToggled)
+    self.navigationCollapsibleButton.connect('toggled(bool)', self.onCommon3DPanelToggled)
+    self.reconstructionCollapsibleButton.connect('toggled(bool)', self.onCommon3DPanelToggled)
 
     # calibration panel
+    self.pivotCalibrationLogic=slicer.modules.pivotcalibration.logic()
+    
     self.calibrationGuideButton.connect('clicked()', self.onCalibrationGuideClicked)
     self.calibrationNeedleButton.connect('clicked()', self.onCalibrationNeedleClicked)
     
@@ -910,6 +840,31 @@ class CathNavGuidelet(Guidelet):
     self.navigationCameraButton.connect('clicked()', self.onNavigationCameraButtonClicked)
     
     # reconstruction panel
+    self.MarkupsToModelClosedSurfaceNode = slicer.vtkMRMLMarkupsToModelNode()
+    self.MarkupsToModelClosedSurfaceNode.SetModelType(self.MarkupsToModelClosedSurfaceNode.ClosedSurface)
+    self.MarkupsToModelClosedSurfaceNode.SetCleanMarkups(True)
+    self.MarkupsToModelClosedSurfaceNode.SetButterflySubdivision(True)
+    self.MarkupsToModelClosedSurfaceNode.SetConvexHull(True)
+    self.MarkupsToModelClosedSurfaceNode.SetDelaunayAlpha(0.0)
+    self.MarkupsToModelClosedSurfaceNode.SetAutoUpdateOutput(False)
+    self.MarkupsToModelClosedSurfaceNode.SetName('MarkupsToModel_ClosedSurfaces')
+    slicer.mrmlScene.AddNode(self.MarkupsToModelClosedSurfaceNode)
+    
+    self.MarkupsToModelCurveNode = slicer.vtkMRMLMarkupsToModelNode()
+    self.MarkupsToModelCurveNode.SetModelType(self.MarkupsToModelCurveNode.Curve)
+    self.MarkupsToModelCurveNode.SetTubeRadius(1.0)
+    self.MarkupsToModelCurveNode.SetTubeNumberOfSides(8)
+    self.MarkupsToModelCurveNode.SetTubeSamplingFrequency(5)
+    self.MarkupsToModelCurveNode.SetCleanMarkups(True)
+    self.MarkupsToModelCurveNode.SetInterpolationType(self.MarkupsToModelCurveNode.Polynomial)
+    self.MarkupsToModelCurveNode.SetPointParameterType(self.MarkupsToModelCurveNode.MinimumSpanningTree)
+    self.MarkupsToModelCurveNode.SetPolynomialOrder(9)
+    self.MarkupsToModelCurveNode.SetAutoUpdateOutput(False)
+    self.MarkupsToModelCurveNode.SetName('MarkupsToModel_CatheterPaths')
+    slicer.mrmlScene.AddNode(self.MarkupsToModelCurveNode)
+    
+    self.MarkupsToModelLogic = slicer.modules.markupstomodel.logic()
+    
     self.reconstructionCameraButton.connect('clicked()', self.onReconstructionCameraButtonClicked)
     self.reconstructionCollectPointsButton.connect('clicked()', self.onReconstructionCollectPointsButtonClicked)
     self.reconstructionDeleteLastButton.connect('clicked()', self.onReconstructionDeleteLastButtonClicked)
@@ -992,42 +947,15 @@ class CathNavGuidelet(Guidelet):
     # to avoid zooming out of the image.
     self.fitUltrasoundImageToViewOnConnect = not toggled
 
-  def onGuidewirePanelToggled(self, toggled):
+  def onCommon3DPanelToggled(self, toggled):
     if toggled == False:
       return
-    logging.debug('onGuidewirePanelToggled')
-    self.onPanelToggledCommonTasks()
-    self.selectView(self.VIEW_3D)
-    
-  def onPlanningPanelToggled(self, toggled):
-    if toggled == False:
-      return
-    logging.debug('onPlanningPanelToggled')
-    self.onPanelToggledCommonTasks()
-    self.selectView(self.VIEW_3D)
-      
-  def onNavigationPanelToggled(self, toggled):
-    if toggled == False:
-      return
-    logging.debug('onNavigationPanelToggled')
-    self.onPanelToggledCommonTasks()
-    self.selectView(self.VIEW_3D)
-    
-  def onReconstructionPanelToggled(self, toggled):
-    if toggled == False:
-      return
-    logging.debug('onReconstructionPanelToggled')
+    logging.debug('onCommon3DPanelToggled')
     self.onPanelToggledCommonTasks()
     self.selectView(self.VIEW_3D)
     
   def onPanelToggledCommonTasks(self):
     self.resetSharedPanelStates()
-    if self.tumorMarkups_Needle:
-      self.tumorMarkups_Needle.SetDisplayVisibility(0)
-    if self.chestwallMarkups_Chest:
-      self.chestwallMarkups_Chest.SetDisplayVisibility(0)
-    if self.needleTipMarkups_Guide:
-      self.needleTipMarkups_Guide.SetDisplayVisibility(0)
   
   def resetSharedPanelStates(self):
     logging.debug('resetSharedPanelStates')
@@ -1204,10 +1132,6 @@ class CathNavGuidelet(Guidelet):
     self.tumorMarkups_Needle.RemoveAllMarkups()
     self.tumorMarkupsDeleteLastButton.setEnabled(False)
     self.tumorMarkupsDeleteAllButton.setEnabled(False)
-    sphereSource = vtk.vtkSphereSource()
-    sphereSource.SetRadius(0.001)
-    self.tumorModel_Needle.SetPolyDataConnection(sphereSource.GetOutputPort())      
-    self.tumorModel_Needle.Modified()
 
   def onChestwallMarkupsPlaceClicked(self, pushed):
     logging.debug('onChestwallMarkupsPlaceClicked')
@@ -1237,129 +1161,31 @@ class CathNavGuidelet(Guidelet):
     self.chestwallMarkups_Chest.RemoveAllMarkups()
     self.chestwallMarkupsDeleteLastButton.setEnabled(False)
     self.chestwallMarkupsDeleteAllButton.setEnabled(False)
-    sphereSource = vtk.vtkSphereSource()
-    sphereSource.SetRadius(0.001)
-    self.chestwallModel_Chest.SetPolyDataConnection(sphereSource.GetOutputPort())
-    self.chestwallModel_Chest.Modified()
 
-  def setAndObserveTumorMarkupsNode(self, tumorMarkups_Needle):
-    logging.debug('setAndObserveTumorMarkupsNode')
-    if tumorMarkups_Needle == self.tumorMarkups_Needle and self.tumorMarkups_NeedleObserver:
-      # no change and node is already observed
-      return
+  def setAndObserveNode(self, node, existingMarkupsObserver, method):
+    logging.debug('setAndObserveNode')
+    if not node:
+      logging.error('No markups node provided. No observer set.')
+      return None
     # Remove observer to old parameter node
-    if self.tumorMarkups_Needle and self.tumorMarkups_NeedleObserver:
-      self.tumorMarkups_Needle.RemoveObserver(self.tumorMarkups_NeedleObserver)
-      self.tumorMarkups_NeedleObserver = None
+    if existingMarkupsObserver:
+      node.RemoveObserver(existingMarkupsObserver)
     # Set and observe new parameter node
-    self.tumorMarkups_Needle = tumorMarkups_Needle
-    if self.tumorMarkups_Needle:
-      self.tumorMarkups_NeedleObserver = self.tumorMarkups_Needle.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onTumorMarkupsNodeModified)
-
-
-  def setAndObserveChestwallMarkupsNode(self, chestwallMarkups_Chest):
-    logging.debug('setAndObserveChestwallMarkupsNode')
-    if chestwallMarkups_Chest == self.chestwallMarkups_Chest and self.chestwallMarkups_ChestObserver:
-      # no change and node is already observed
-      return
-    # Remove observer to old parameter node
-    if self.chestwallMarkups_Chest and self.chestwallMarkups_ChestObserver:
-      self.chestwallMarkups_Chest.RemoveObserver(self.chestwallMarkups_ChestObserver)
-      self.chestwallMarkups_ChestObserver = None
-    # Set and observe new parameter node
-    self.chestwallMarkups_Chest = chestwallMarkups_Chest
-    if self.chestwallMarkups_Chest:
-      self.chestwallMarkups_ChestObserver = self.chestwallMarkups_Chest.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onChestwallMarkupsNodeModified)
+    newMarkupsObserver = node.AddObserver(vtk.vtkCommand.ModifiedEvent, method)
+    return newMarkupsObserver
 
   def onTumorMarkupsNodeModified(self, observer, eventid):
     logging.debug('onTumorMarkupsNodeModified')
-    self.createConvexHullFromMarkups(self.tumorMarkups_Needle, self.tumorModel_Needle)
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.tumorMarkups_Needle.GetID())
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.tumorModel_Needle.GetID())
+    self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
 
   def onChestwallMarkupsNodeModified(self, observer, eventid):
     logging.debug('onChestwallMarkupsNodeModified')
-    self.createConvexHullFromMarkups(self.chestwallMarkups_Chest, self.chestwallModel_Chest)
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.chestwallMarkups_Chest.GetID())
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.chestwallModel_Chest.GetID())
+    self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
 
-  def createConvexHullFromMarkups(self, markupsNode, modelNode):
-    logging.debug('createConvexHullFromMarkups')
-
-    pointPolyData = self.getPointPolyDataFromFiducials(markupsNode)
-    
-    numberOfPoints = pointPolyData.GetNumberOfVerts()
-    delaunay = vtk.vtkDelaunay3D()
-    if numberOfPoints<10:
-      logging.debug("use glyphs")
-      sphere = vtk.vtkCubeSource()
-      glyph = vtk.vtkGlyph3D()
-      glyph.SetInputData(pointPolyData)
-      glyph.SetSourceConnection(sphere.GetOutputPort())
-      #glyph.SetVectorModeToUseNormal()
-      #glyph.SetScaleModeToScaleByVector()
-      #glyph.SetScaleFactor(0.25)
-      delaunay.SetInputConnection(glyph.GetOutputPort())
-    else:
-      delaunay.SetInputData(pointPolyData)
-
-    surfaceFilter = vtk.vtkDataSetSurfaceFilter()
-    surfaceFilter.SetInputConnection(delaunay.GetOutputPort())
-
-    smoother = vtk.vtkButterflySubdivisionFilter()
-    smoother.SetInputConnection(surfaceFilter.GetOutputPort())
-    smoother.SetNumberOfSubdivisions(3)
-    smoother.Update()
-    
-    forceConvexShape = True
-
-    normals = vtk.vtkPolyDataNormals()
-    if (forceConvexShape == True):
-        delaunaySmooth = vtk.vtkDelaunay3D()
-        delaunaySmooth.SetInputConnection(smoother.GetOutputPort())
-        delaunaySmooth.Update()
-    
-        smoothSurfaceFilter = vtk.vtkDataSetSurfaceFilter()
-        smoothSurfaceFilter.SetInputConnection(delaunaySmooth.GetOutputPort())
-        normals.SetInputConnection(smoothSurfaceFilter.GetOutputPort())
-    else:
-        normals.SetInputConnection(smoother.GetOutputPort())
-    modelNode.SetPolyDataConnection(normals.GetOutputPort())
-    
-    modelNode.Modified()
-  
-  def getPointPolyDataFromFiducials(self,fiducialList):
-    # Create polydata point set from markup points
-    points = vtk.vtkPoints()
-    cellArray = vtk.vtkCellArray()
-    
-    numberOfPoints = fiducialList.GetNumberOfFiducials()
-
-    # Surface generation algorithms behave unpredictably when there are not enough points
-    # return if there are very few points
-    if numberOfPoints<1:
-      return vtk.vtkPolyData() # empty
-
-    points.SetNumberOfPoints(numberOfPoints)
-    new_coord = [0.0, 0.0, 0.0]
-
-    for i in xrange(numberOfPoints):
-      fiducialList.GetNthFiducialPosition(i,new_coord)
-      points.SetPoint(i, new_coord)
-
-    cellArray.InsertNextCell(numberOfPoints)
-    for i in range(numberOfPoints):
-      cellArray.InsertCellPoint(i)
-    pointPolyData = vtk.vtkPolyData()
-    pointPolyData.SetLines(cellArray)
-    pointPolyData.SetPoints(points)
-    return pointPolyData
-  # ========== GUIDE WIRE PANEL FUNCTIONS ===========
-  
-  def recordGuidePosition(self):
-    logging.debug('recordGuidePosition')
-    matrixPlanToNeedle = vtk.vtkMatrix4x4()
-    needleTransformNode = self.needleToChest
-    gridTransformNode = self.guideCameraToGuideModel # we take a snapshot of the guide's position
-    gridTransformNode.GetMatrixTransformToNode(needleTransformNode,matrixPlanToNeedle)
-    self.planToNeedle.SetMatrixTransformToParent(matrixPlanToNeedle)
-  
   # =========== PLANNING PANEL FUNCTIONS ============
     
   def gridSpacingHorizontalIncrease(self):
@@ -1600,7 +1426,6 @@ class CathNavGuidelet(Guidelet):
   
   def startPointCollection(self):
     logging.debug('startPointCollection')
-    self.wirePoints_Needle.RemoveAllMarkups()
     self.collectFiducialsSupplementLogic.setMinimumAddDistanceMm(1) # collect points every 0.1 mm
     self.collectFiducialsSupplementLogic.setTransformSourceNode(self.wireToChest)
     self.collectFiducialsSupplementLogic.setTransformTargetNode(self.needleToChest)
@@ -1608,73 +1433,67 @@ class CathNavGuidelet(Guidelet):
     self.collectFiducialsSupplementLogic.setAllowPointRemovalsTrue()
     self.collectFiducialsSupplementLogic.setForceConstantPointDistanceFalse()
     self.collectFiducialsSupplementLogic.startCollection()
-    self.setAndObserveWireMarkupsNode()
+    self.wirePoints_Needle.RemoveAllMarkups()
+    self.wirePoints_NeedleObserver = self.setAndObserveNode(currentWirePoints_Needle, currentWirePoints_NeedleObserver, self.onWireMarkupsNodeModified)
+    self.pathCount = self.pathCount + 1
     logging.debug('startPointCollection end')
     
   def stopPointCollection(self):
     # Stop collection
     self.collectFiducialsSupplementLogic.stopCollection()
-    self.removeWireMarkupsObservers()
+    if self.wirePoints_Needle and self.wirePoints_NeedleObserver:
+      self.wirePoints_Needle.RemoveObserver(self.wirePoints_NeedleObserver)
+      self.wirePoints_NeedleObserver = None
     
     # Create a copy of the list for data storage purposes
+    if self.reconstructionThread:
+      while self.reconstructionThread.isAlive():
+        pass # wait until the thread terminates? TODO: Ask Andras if there is a safer way
+    # Do one final reconstruction
+    markupsNode = self.wirePoints_Needle
+    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode)
+    modelNode = self.getCatheterModelForPathNumber(self.pathCount)
+    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode)
+    self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelCurveNode)
+    
+    # create a copy of the markups for analysis purposes
     storeRawFiducialsListName = 'WirePoints_Needle_RawPath' + str(self.pathCount)
     storeRawFiducialsList = self.initializeFiducialList(storeRawFiducialsListName)
-    storeRawFiducialsList.SetDisplayVisibility(0)
     self.copyFiducialsFromListToList(self.wirePoints_Needle,storeRawFiducialsList)
+    self.wirePoints_Needle.RemoveAllMarkups()
     self.pathCount = self.pathCount + 1
-    
-  def setAndObserveWireMarkupsNode(self):
-    logging.debug('setAndObserveWireMarkupsNode')
-    # Remove observer to old parameter node
-    if self.wirePoints_Needle and self.wirePoints_NeedleObserver:
-      self.wirePoints_Needle.RemoveObserver(self.wirePoints_NeedleObserver)
-      self.wirePoints_NeedleObserver = None
-    # Set and observe new parameter node
-    if self.wirePoints_Needle:
-      self.wirePoints_NeedleObserver = self.wirePoints_Needle.AddObserver(vtk.vtkCommand.ModifiedEvent, self.onWireMarkupsNodeModified)
-  
-  def removeWireMarkupsObservers(self):
-    logging.debug('removeWireMarkupsObservers')
-    if self.wirePoints_Needle and self.wirePoints_NeedleObserver:
-      self.wirePoints_Needle.RemoveObserver(self.wirePoints_NeedleObserver)
-      self.wirePoints_NeedleObserver = None
   
   def onWireMarkupsNodeModified(self, observer, eventid):
     if self.reconstructionThread:
       if self.reconstructionThread.isAlive():
         return
-      else: # thread finished running, replace the model with its stored buffer
-        newModelNode = self.reconstructionThread.bufferModelNode
-        newModelDisplayNode = self.reconstructionThread.bufferModelDisplayNode
-        if newModelNode and newModelDisplayNode:
-          tubeModel_Needle = slicer.util.getNode(self.getTubeModelNameForPathNumber(self.reconstructionThread.pathNumber))
-          # Remove the old node, if it exists
-          if tubeModel_Needle:
-            slicer.mrmlScene.RemoveNode(tubeModel_Needle)
-          slicer.mrmlScene.AddNode(newModelNode)
-          slicer.mrmlScene.AddNode(newModelDisplayNode)
-          newModelNode.SetAndObserveDisplayNodeID(newModelDisplayNode.GetID())
-          newModelNode.SetAndObserveTransformNodeID(self.needleToChest.GetID())
-
-    pointListMm = self.getListFromFiducials(self.wirePoints_Needle)
-    self.reconstructionThread = ReconstructionThread(pointListMm, self.pathCount)
+    markupsNode = self.wirePoints_Needle
+    if markupsNode.GetNumberOfFiducials() <= 10:
+      return
+    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode)
+    modelNode = self.getCatheterModelForPathNumber(self.pathCount)
+    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode)
+    self.reconstructionThread = ReconstructionThread(self.MarkupsToModelCurveNode)
     self.reconstructionThread.start()
     logging.debug('onWireMarkupsNodeModified - end')
-
-  def getTubeModelNameForPathNumber(self, pathNumber):
-    return ('Tube' + str(pathNumber))
-
-  def getListFromFiducials(self, fiducialList):
-    logging.debug('getListFromFiducials')
-    # Fit a polynomial to the collected points in each dimension
-    numPoints = fiducialList.GetNumberOfFiducials()
-    pointMmList = []
-    pointIndexRange = range(0,numPoints)
-    for pointIndex in pointIndexRange:
-      pointMm = [0.0,0.0,0.0]
-      fiducialList.GetNthFiducialPosition(pointIndex,pointMm)
-      pointMmList.append(pointMm)
-    return pointMmList
+    
+  def getCatheterModelForPathNumber(self, pathNumber):
+    nodeName = self.getCatheterModelNameForPathNumber()
+    modelNode = slicer.util.getNode(nodeName)
+    if not modelNode:
+      modelNode = slicer.vtkMRMLModelNode()
+      modelNode.SetName(nodeName)
+      slicer.mrmlScene.AddNode(modelNode)
+      # Add display node
+      displayNode = slicer.vtkMRMLModelDisplayNode()
+      displayNode.SetColor(0,1,0) # Green
+      displayNode.BackfaceCullingOff()
+      displayNode.SliceIntersectionVisibilityOn()
+      displayNode.SetSliceIntersectionThickness(2)
+      displayNode.SetOpacity(0.3) # Between 0-1, 1 being opaque
+      slicer.mrmlScene.AddNode(displayNode)
+      modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+    return modelNode
 
   def onReconstructionCollectPointsButtonClicked(self):
     logging.debug('onReconstructionCollectPointsButtonClicked')
@@ -1686,232 +1505,13 @@ class CathNavGuidelet(Guidelet):
   def onReconstructionDeleteLastButtonClicked(self):
     logging.debug('onReconstructionDeleteLastButtonClicked')
     
-  def updateReconstructionGUI(self):
-    logging.debug('updateReconstructionGUI')
-    
 class ReconstructionThread (threading.Thread):
-  def __init__(self, pointListMm, pathNumber):
+  def __init__(self, markupsToModelNode):
     threading.Thread.__init__(self)
-    # inputs
-    self.pointListMm = pointListMm
-    self.pathNumber = pathNumber
-    # optional parameters?
-    self.numPointsForRed = 0
-    self.numPointsForBlue = 20
-    self.scalarMinRange = self.numPointsForRed
-    self.scalarMaxRange = self.numPointsForBlue
-    self.tubeNumberOfSides = 16
-    # outputs:
-    self.bufferModelNode = None
-    self.bufferModelDisplayNode = None
+    self.markupsToModelNode = markupsToModelNode
+    self.MarkupsToModelLogic = slicer.modules.markupstomodel.logic()
     
   def run(self):
     logging.debug("ReconstructionThread.run()")
-    if (len(self.pointListMm) <= 10):
-      return
-    smoothedPointListMm = self.smoothPointList(self.pointListMm)
-    tubePolyData = self.createTubePolyDataFromPointList(smoothedPointListMm)
-    tubeScalars = self.computeTubeScalars(self.pointListMm, tubePolyData)
-    self.createModelAndDisplayNodes(self.pathNumber, tubePolyData, tubeScalars)
-  
-  def smoothPointList(self, rawPointMmListXYZ):
-    logging.debug('smoothPointList')
-    
-    rawPointMmListX = []
-    rawPointMmListY = []
-    rawPointMmListZ = []
-    for i in xrange(0,len(rawPointMmListXYZ)):
-      rawPointMmXYZ = rawPointMmListXYZ[i]
-      rawPointMmListX.append(rawPointMmXYZ[0])
-      rawPointMmListY.append(rawPointMmXYZ[1])
-      rawPointMmListZ.append(rawPointMmXYZ[2])
-    polynomialDegree = 3
-    rawPointWeights = self.determinePointWeightsMinimumSpanningTree(rawPointMmListXYZ)
-    polynomialXMm = numpy.polyfit(rawPointWeights,rawPointMmListX,polynomialDegree)
-    polynomialYMm = numpy.polyfit(rawPointWeights,rawPointMmListY,polynomialDegree)
-    polynomialZMm = numpy.polyfit(rawPointWeights,rawPointMmListZ,polynomialDegree)
-    
-    # Generate a list of points along the polynomialtube
-    smoothPointMmListXYZ = []
-    for weight in numpy.arange(0,1,0.01):
-      smoothPointMmListX = numpy.polyval(polynomialXMm,weight)
-      smoothPointMmListY = numpy.polyval(polynomialYMm,weight)
-      smoothPointMmListZ = numpy.polyval(polynomialZMm,weight)
-      smoothPointMmListXYZ.append([smoothPointMmListX, smoothPointMmListY, smoothPointMmListZ])
-    
-    return smoothPointMmListXYZ
-  
-  def getPointPolyDataFromList(self,list): # native python list
-    logging.debug('getPointPolyDataFromList')
-    points = vtk.vtkPoints()
-    cellArray = vtk.vtkCellArray()
-    
-    numberOfPoints = len(list)
-
-    # return if there are very few points
-    if numberOfPoints<1:
-      return vtk.vtkPolyData() # empty
-
-    points.SetNumberOfPoints(numberOfPoints)
-    new_coord = [0.0, 0.0, 0.0]
-
-    for i in xrange(numberOfPoints):
-      points.SetPoint(i, list[i])
-
-    cellArray.InsertNextCell(numberOfPoints)
-    for i in xrange(numberOfPoints):
-      cellArray.InsertCellPoint(i)
-    pointPolyData = vtk.vtkPolyData()
-    pointPolyData.SetLines(cellArray)
-    pointPolyData.SetPoints(points)
-    return pointPolyData
-  
-  def createTubePolyDataFromPointList(self, pointList):
-    logging.debug('createTubeFilterFromPointList')
-  
-    pointPolyData = self.getPointPolyDataFromList(pointList)
-
-    tubeFilter = vtk.vtkTubeFilter()
-    tubeFilter.SetRadius(0.5) #0.5 mm
-    tubeFilter.SetNumberOfSides(self.tubeNumberOfSides)
-    tubeFilter.SetInputData(pointPolyData)
-    tubeFilter.Update()
-
-    return tubeFilter.GetOutput()
-
-  def computeTubeScalars(self, rawPointList, tubePolyData):
-    logging.debug('computeTubeScalars')
-
-    pointDataSet = self.getPointPolyDataFromList(rawPointList)
-    pointLocator = vtk.vtkPointLocator()
-    pointLocator.SetNumberOfPointsPerBucket(3)
-    pointLocator.SetDataSet(pointDataSet)
-    pointLocator.BuildLocator()
-
-    searchRadius = 10 # 1 cm
-    numPoints = tubePolyData.GetNumberOfPoints()
-    scalars = vtk.vtkDoubleArray()
-    scalars.SetNumberOfComponents( 1 )
-    scalars.SetNumberOfTuples( numPoints )
-    scalars.SetName( "LocalDensity" )
-    for i in xrange(0, numPoints):
-      resultList = vtk.vtkIdList()
-      point = tubePolyData.GetPoint(i)
-      pointLocator.FindPointsWithinRadius(searchRadius,point,resultList)
-      numNearby = resultList.GetNumberOfIds()
-      scalar = numpy.clip(numNearby,self.numPointsForRed,self.numPointsForBlue)
-      scalars.SetValue( i, scalar)
-    return scalars
-
-  def createModelAndDisplayNodes(self, pathNumber, tubePolyData, tubeModelColorScalars):
-    logging.debug('createModelAndDisplayNodes')
-    
-    tubeModelName = self.getTubeModelNameForPathNumber(pathNumber)
-
-    # Create the model node
-    self.bufferModelNode = slicer.vtkMRMLModelNode()
-    self.bufferModelNode.SetName(tubeModelName)
-    self.bufferModelNode.SetAndObservePolyData(tubePolyData)
-    self.bufferModelNode.AddScalars(tubeModelColorScalars,0)
-
-    # Create the display node
-    self.bufferModelDisplayNode = slicer.vtkMRMLModelDisplayNode()
-    self.bufferModelDisplayNode.SetColor(0,1,0) # Green by default
-    self.bufferModelDisplayNode.BackfaceCullingOff()
-    self.bufferModelDisplayNode.SliceIntersectionVisibilityOn()
-    self.bufferModelDisplayNode.SetSliceIntersectionThickness(4)
-    self.bufferModelDisplayNode.SetOpacity(0.3) # Between 0-1, 1 being opaque
-    self.bufferModelDisplayNode.SetScalarVisibility( True )
-    self.bufferModelDisplayNode.SetActiveScalarName( "LocalDensity" )
-    self.bufferModelDisplayNode.SetAndObserveColorNodeID( "vtkMRMLColorTableNodeFileHotToColdRainbow.txt" )
-    self.bufferModelDisplayNode.AutoScalarRangeOff()
-    self.bufferModelDisplayNode.SetScalarRangeFlag(self.bufferModelDisplayNode.UseDisplayNodeScalarRange)
-    self.bufferModelDisplayNode.SetScalarRange(self.scalarMinRange,self.scalarMaxRange)
-
-  def getTubeModelNameForPathNumber(self, pathNumber):
-    return ('Tube' + str(pathNumber))
-      
-  def determinePointWeightsMinimumSpanningTree(self, pointsMm):
-    logging.debug('determinePointWeightsMinimumSpanningTree')
-    # create the undirected graph and the edge list
-    mutableMinimumSpanningTree = vtk.vtkMutableDirectedGraph()
-    rootNode = mutableMinimumSpanningTree.AddVertex() # first vertex
-    listOfNodes = [rootNode]
-    for i in xrange(1, len(pointsMm)):
-      listOfNodes.append(0) # these are dummy values
-    
-    remainingPoints = range(1,len(pointsMm))
-    lastAddedIndex = 0
-    maxValueMm = 100000
-    
-    # initialize the tree construction process
-    primDistances = [] # distance to nearest point in tree
-    primDistancePoints = [] # the point in the tree that is closest
-    for i in xrange(0, len(pointsMm)):
-      pointLast = pointsMm[lastAddedIndex]
-      pointI = pointsMm[i]
-      distanceMm = numpy.sqrt((pointLast[0]-pointI[0])**2+(pointLast[1]-pointI[1])**2+(pointLast[2]-pointI[2])**2)
-      primDistances.append(distanceMm)
-      primDistancePoints.append(lastAddedIndex)
-      
-    # iteratively add the nearest point to the tree
-    while remainingPoints:
-      minimumDistanceMm = maxValueMm
-      minimumDistanceRemainPointIndex = 0
-      minimumDistanceTreePointIndex = 0
-      for i in remainingPoints:
-        if primDistances[i] < minimumDistanceMm:
-          minimumDistanceMm = primDistances[i]
-          minimumDistanceTreePointIndex = primDistancePoints[i]
-          minimumDistanceRemainPointIndex = i
-      nearestTreeNode = listOfNodes[minimumDistanceTreePointIndex]
-      nearestRemainNode = mutableMinimumSpanningTree.AddChild(nearestTreeNode)
-      listOfNodes[minimumDistanceRemainPointIndex] = nearestRemainNode
-      lastAddedIndex = minimumDistanceRemainPointIndex
-      remainingPoints.remove(lastAddedIndex)
-      for i in remainingPoints:
-        pointLast = pointsMm[lastAddedIndex]
-        pointI = pointsMm[i]
-        distanceMm = numpy.sqrt((pointLast[0]-pointI[0])**2+(pointLast[1]-pointI[1])**2+(pointLast[2]-pointI[2])**2)
-        primDistances[i] = distanceMm
-        primDistancePoints[i] = lastAddedIndex
-        
-    # get the minimum spanning tree
-    minimumSpanningTree = vtk.vtkTree()
-    minimumSpanningTree.ShallowCopy(mutableMinimumSpanningTree)
-    slicer.testMST = minimumSpanningTree
-    
-    # find the path from the last node to the first node (just go up the tree)
-    currentNode = listOfNodes[len(pointsMm)-1]; # start at the final collected fiducial
-    firstNode = listOfNodes[0]
-    path = [currentNode]
-    while (currentNode != firstNode):
-      currentNode = minimumSpanningTree.GetParent(currentNode)
-      path.append(currentNode)
-    path = list(reversed(path)) # now in order from first point to final point
-    
-    # find the weights for points along the path, between 0 and 1
-    pathWeights = [0]
-    for i in xrange(1,len(path)):
-      pointIMinus1 = pointsMm[i-1]
-      pointI = pointsMm[i]
-      distanceMm = numpy.sqrt((pointIMinus1[0]-pointI[0])**2+(pointIMinus1[1]-pointI[1])**2+(pointIMinus1[2]-pointI[2])**2)
-      pathWeights.append(pathWeights[i-1] + distanceMm)
-    if (pathWeights[len(pathWeights)-1] == 0):
-      logging.error("Error in determinePointWeightsMinimumSpanningTree: Path length is zero. Returning empty list.")
-      return []
-    for i in xrange(0, len(pathWeights)):
-      pathWeights[i] = pathWeights[i] / pathWeights[len(pathWeights)-1]
-    
-    # determine the weights for *each* point individually and return
-    pointWeights = []
-    for i in xrange(0, len(pointsMm)):
-      currentNode = listOfNodes[i]
-      while (currentNode not in path):
-        currentNode = minimumSpanningTree.GetParent(currentNode)
-      indexOfNearestPathNode = path.index(currentNode)
-      pointWeight = pathWeights[indexOfNearestPathNode]
-      pointWeights.append(pointWeight)
-    
-    return pointWeights
+    self.MarkupsToModelLogic.UpdateOutputModel(self.markupsToModelNode)
   
