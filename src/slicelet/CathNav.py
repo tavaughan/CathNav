@@ -153,11 +153,9 @@ class CathNavGuidelet(Guidelet):
     
     self.tumorMarkups_NeedleObserver = None
     self.chestwallMarkups_ChestObserver = None
-    self.listWirePoints_NeedleObserver = None
+    self.wirePoints_NeedleObserver = None
     self.pathCount = 0
     self.reconstructionThread = None
-    # self.wirePoints_Needle
-    # self.wirePoints_NeedleObserver
 
     self.setupScene()
 
@@ -1186,7 +1184,17 @@ class CathNavGuidelet(Guidelet):
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.chestwallModel_Chest.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
 
-  # =========== PLANNING PANEL FUNCTIONS ============
+
+  # ========== GUIDE WIRE PANEL FUNCTIONS ===========
+  
+  def recordGuidePosition(self):
+    logging.debug('recordGuidePosition')
+    matrixPlanToNeedle = vtk.vtkMatrix4x4()
+    needleTransformNode = self.needleToChest
+    gridTransformNode = self.guideCameraToGuideModel # we take a snapshot of the guide's position
+    gridTransformNode.GetMatrixTransformToNode(needleTransformNode,matrixPlanToNeedle)
+    self.planToNeedle.SetMatrixTransformToParent(matrixPlanToNeedle)
+    # =========== PLANNING PANEL FUNCTIONS ============
     
   def gridSpacingHorizontalIncrease(self):
     logging.debug('gridSpacingHorizontalIncrease')
@@ -1434,7 +1442,7 @@ class CathNavGuidelet(Guidelet):
     self.collectFiducialsSupplementLogic.setForceConstantPointDistanceFalse()
     self.collectFiducialsSupplementLogic.startCollection()
     self.wirePoints_Needle.RemoveAllMarkups()
-    self.wirePoints_NeedleObserver = self.setAndObserveNode(currentWirePoints_Needle, currentWirePoints_NeedleObserver, self.onWireMarkupsNodeModified)
+    self.wirePoints_NeedleObserver = self.setAndObserveNode(self.wirePoints_Needle, self.wirePoints_NeedleObserver, self.onWireMarkupsNodeModified)
     self.pathCount = self.pathCount + 1
     logging.debug('startPointCollection end')
     
@@ -1451,9 +1459,9 @@ class CathNavGuidelet(Guidelet):
         pass # wait until the thread terminates? TODO: Ask Andras if there is a safer way
     # Do one final reconstruction
     markupsNode = self.wirePoints_Needle
-    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode)
+    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode.GetID())
     modelNode = self.getCatheterModelForPathNumber(self.pathCount)
-    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode)
+    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelCurveNode)
     
     # create a copy of the markups for analysis purposes
@@ -1470,15 +1478,15 @@ class CathNavGuidelet(Guidelet):
     markupsNode = self.wirePoints_Needle
     if markupsNode.GetNumberOfFiducials() <= 10:
       return
-    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode)
+    self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode.GetID())
     modelNode = self.getCatheterModelForPathNumber(self.pathCount)
-    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode)
+    self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode.GetID())
     self.reconstructionThread = ReconstructionThread(self.MarkupsToModelCurveNode)
     self.reconstructionThread.start()
     logging.debug('onWireMarkupsNodeModified - end')
     
   def getCatheterModelForPathNumber(self, pathNumber):
-    nodeName = self.getCatheterModelNameForPathNumber()
+    nodeName = self.getCatheterModelNameForPathNumber(pathNumber)
     modelNode = slicer.util.getNode(nodeName)
     if not modelNode:
       modelNode = slicer.vtkMRMLModelNode()
@@ -1494,6 +1502,9 @@ class CathNavGuidelet(Guidelet):
       slicer.mrmlScene.AddNode(displayNode)
       modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
     return modelNode
+  
+  def getCatheterModelNameForPathNumber(self, pathNumber):
+    return ('Catheter' + str(pathNumber))
 
   def onReconstructionCollectPointsButtonClicked(self):
     logging.debug('onReconstructionCollectPointsButtonClicked')
