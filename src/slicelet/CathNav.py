@@ -129,8 +129,7 @@ class CathNavGuidelet(Guidelet):
   gridSizeRightNumPoints = 2
   gridSizeUpNumPoints = 2
   gridSizeDownNumPoints = 2
-  gridSpacingHorizontalMm = 10
-  gridSpacingVerticalMm = 10
+  gridSpacingMm = 10
   
   # Calibration
   currentCalibration = 0
@@ -593,28 +592,17 @@ class CathNavGuidelet(Guidelet):
     self.planningFormLayout = qt.QFormLayout(self.planningGridCollapsibleButton)
     
     # Various grid settings
-    self.planningGridSpacingHorizontalLabel = qt.QLabel(qt.Qt.Horizontal,None)
-    self.planningGridSpacingHorizontalLabel.setText("Grid spacing (horizontal):")  
-    self.planningFormLayout.addRow(self.planningGridSpacingHorizontalLabel)
+    self.planningGridSpacingLabel = qt.QLabel(qt.Qt.Horizontal,None)
+    self.planningGridSpacingLabel.setText("Grid spacing:")  
+    self.planningFormLayout.addRow(self.planningGridSpacingLabel)
     
-    self.planningGridSpacingHorizontalIncrease = qt.QPushButton(iconGridIncHorSpace,"")
-    self.planningGridSpacingHorizontalDecrease = qt.QPushButton(iconGridDecHorSpace,"")
-    self.planningGridSpacingHorizontalButtons = qt.QHBoxLayout()
-    self.planningGridSpacingHorizontalButtons.addWidget(self.planningGridSpacingHorizontalDecrease)
-    self.planningGridSpacingHorizontalButtons.addWidget(self.planningGridSpacingHorizontalIncrease)
-    self.planningFormLayout.addRow(self.planningGridSpacingHorizontalButtons)
+    self.planningGridSpacingIncrease = qt.QPushButton(iconGridIncHorSpace,"")
+    self.planningGridSpacingDecrease = qt.QPushButton(iconGridDecHorSpace,"")
+    self.planningGridSpacingButtons = qt.QHBoxLayout()
+    self.planningGridSpacingButtons.addWidget(self.planningGridSpacingDecrease)
+    self.planningGridSpacingButtons.addWidget(self.planningGridSpacingIncrease)
+    self.planningFormLayout.addRow(self.planningGridSpacingButtons)
     
-    self.planningGridSpacingVerticalLabel = qt.QLabel(qt.Qt.Horizontal,None)
-    self.planningGridSpacingVerticalLabel.setText("Grid spacing (vertical):")  
-    self.planningFormLayout.addRow(self.planningGridSpacingVerticalLabel)
-    
-    self.planningGridSpacingVerticalIncrease = qt.QPushButton(iconGridIncVerSpace,"")
-    self.planningGridSpacingVerticalDecrease = qt.QPushButton(iconGridDecVerSpace,"")
-    self.planningGridSpacingVerticalButtons = qt.QVBoxLayout()
-    self.planningGridSpacingVerticalButtons.addWidget(self.planningGridSpacingVerticalIncrease)
-    self.planningGridSpacingVerticalButtons.addWidget(self.planningGridSpacingVerticalDecrease)
-    self.planningFormLayout.addRow(self.planningGridSpacingVerticalButtons)
-
     self.planningGridSizeLabel = qt.QLabel(qt.Qt.Horizontal,None)
     self.planningGridSizeLabel.setText("Grid size:")  
     self.planningFormLayout.addRow(self.planningGridSizeLabel)
@@ -821,10 +809,8 @@ class CathNavGuidelet(Guidelet):
     self.planningGridSizeUpDecrease.connect('clicked()', self.gridSizeUpDecrease)
     self.planningGridSizeDownIncrease.connect('clicked()', self.gridSizeDownIncrease)
     self.planningGridSizeDownDecrease.connect('clicked()', self.gridSizeDownDecrease)
-    self.planningGridSpacingHorizontalIncrease.connect('clicked()', self.gridSpacingHorizontalIncrease)
-    self.planningGridSpacingHorizontalDecrease.connect('clicked()', self.gridSpacingHorizontalDecrease)
-    self.planningGridSpacingVerticalIncrease.connect('clicked()', self.gridSpacingVerticalIncrease)
-    self.planningGridSpacingVerticalDecrease.connect('clicked()', self.gridSpacingVerticalDecrease)
+    self.planningGridSpacingIncrease.connect('clicked()', self.gridSpacingIncrease)
+    self.planningGridSpacingDecrease.connect('clicked()', self.gridSpacingDecrease)
     self.gridRotationSlider.connect('valueChanged(double)', self.rotateGrid)
     
     # navigation
@@ -1196,30 +1182,18 @@ class CathNavGuidelet(Guidelet):
     self.planToNeedle.SetMatrixTransformToParent(matrixPlanToNeedle)
     # =========== PLANNING PANEL FUNCTIONS ============
     
-  def gridSpacingHorizontalIncrease(self):
-    logging.debug('gridSpacingHorizontalIncrease')
-    gridSpacingHorizontalMaxMm = 20
-    if self.gridSpacingHorizontalMm < gridSpacingHorizontalMaxMm:
-      self.gridSpacingHorizontalMm = self.gridSpacingHorizontalMm + 1
+  def gridSpacingIncrease(self):
+    logging.debug('gridSpacingIncrease')
+    gridSpacingMaxMm = 20
+    if self.gridSpacingMm < gridSpacingMaxMm:
+      self.gridSpacingMm = self.gridSpacingMm + 1
   
-  def gridSpacingHorizontalDecrease(self):
-    logging.debug('gridSpacingHorizontalDecrease')
-    gridSpacingHorizontalMinMm = 1
-    if self.gridSpacingHorizontalMm > gridSpacingHorizontalMinMm:
-      self.gridSpacingHorizontalMm = self.gridSpacingHorizontalMm - 1
+  def gridSpacingDecrease(self):
+    logging.debug('gridSpacingDecrease')
+    gridSpacingMinMm = 1
+    if self.gridSpacingMm > gridSpacingMinMm:
+      self.gridSpacingMm = self.gridSpacingMm - 1
   
-  def gridSpacingVerticalIncrease(self):
-    logging.debug('gridSpacingVerticalIncrease')
-    gridSpacingVerticalMaxMm = 20
-    if self.gridSpacingVerticalMm < gridSpacingVerticalMaxMm:
-      self.gridSpacingVerticalMm = self.gridSpacingVerticalMm + 1
-  
-  def gridSpacingVerticalDecrease(self):
-    logging.debug('gridSpacingVerticalDecrease')
-    gridSpacingVerticalMinMm = 1
-    if self.gridSpacingVerticalMm > gridSpacingVerticalMinMm:
-      self.gridSpacingVerticalMm = self.gridSpacingVerticalMm - 1
-    
   def gridSizeLeftIncrease(self):
     logging.debug('gridSizeLeftIncrease')
     gridSizeLeftMaxNumPoints = 10
@@ -1272,13 +1246,16 @@ class CathNavGuidelet(Guidelet):
     logging.debug("onCreatePlanButtonClicked")
     self.recordGuidePosition() #TODO: Move this function elsewhere?
     # update grid parameters
-    gridSizeLeftMm = self.gridSizeLeftNumPoints * self.gridSpacingHorizontalMm
-    gridSizeRightMm = self.gridSizeRightNumPoints * self.gridSpacingHorizontalMm
-    gridSizeUpMm = self.gridSizeUpNumPoints * self.gridSpacingVerticalMm
-    gridSizeDownMm = self.gridSizeDownNumPoints * self.gridSpacingVerticalMm
+    gridSpacingHorizontalMm = self.gridSpacingMm
+    gridSpacingHalfHorizontalMm = gridSpacingHorizontalMm / 2.0
+    gridSpacingVerticalMm = numpy.sqrt(self.gridSpacingMm ** 2 - gridSpacingHalfHorizontalMm ** 2)
+    gridSizeLeftMm = self.gridSizeLeftNumPoints * gridSpacingHorizontalMm
+    gridSizeRightMm = self.gridSizeRightNumPoints * gridSpacingHorizontalMm
+    gridSizeUpMm = self.gridSizeUpNumPoints * gridSpacingVerticalMm
+    gridSizeDownMm = self.gridSizeDownNumPoints * gridSpacingVerticalMm
     self.planningLogic.setGridPatternToTriangular()
-    self.planningLogic.setGridSpacingHorizontalMm(self.gridSpacingHorizontalMm)
-    self.planningLogic.setGridSpacingVerticalMm(self.gridSpacingVerticalMm)
+    self.planningLogic.setGridSpacingHorizontalMm(gridSpacingHorizontalMm)
+    self.planningLogic.setGridSpacingVerticalMm(gridSpacingVerticalMm)
     self.planningLogic.setGridSizeLeftMm(gridSizeLeftMm)
     self.planningLogic.setGridSizeRightMm(gridSizeRightMm)
     self.planningLogic.setGridSizeUpMm(gridSizeUpMm)
