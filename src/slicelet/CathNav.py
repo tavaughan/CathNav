@@ -603,6 +603,10 @@ class CathNavGuidelet(Guidelet):
     self.planningGridSpacingButtons.addWidget(self.planningGridSpacingIncrease)
     self.planningFormLayout.addRow(self.planningGridSpacingButtons)
     
+    self.planningGridSpacingOutputLineEdit = qt.QLineEdit("Spacing: " + str(self.gridSpacingMm) + " mm")
+    self.planningGridSpacingOutputLineEdit.setReadOnly(True)
+    self.planningFormLayout.addRow(self.planningGridSpacingOutputLineEdit)
+    
     self.planningGridSizeLabel = qt.QLabel(qt.Qt.Horizontal,None)
     self.planningGridSizeLabel.setText("Grid size:")  
     self.planningFormLayout.addRow(self.planningGridSizeLabel)
@@ -1187,12 +1191,14 @@ class CathNavGuidelet(Guidelet):
     gridSpacingMaxMm = 20
     if self.gridSpacingMm < gridSpacingMaxMm:
       self.gridSpacingMm = self.gridSpacingMm + 1
+    self.planningGridSpacingOutputLineEdit.setText("Spacing: " + str(self.gridSpacingMm) + " mm")
   
   def gridSpacingDecrease(self):
     logging.debug('gridSpacingDecrease')
     gridSpacingMinMm = 1
     if self.gridSpacingMm > gridSpacingMinMm:
       self.gridSpacingMm = self.gridSpacingMm - 1
+    self.planningGridSpacingOutputLineEdit.setText("Spacing: " + str(self.gridSpacingMm) + " mm")
   
   def gridSizeLeftIncrease(self):
     logging.debug('gridSizeLeftIncrease')
