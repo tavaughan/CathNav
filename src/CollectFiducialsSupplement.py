@@ -237,7 +237,6 @@ class CollectFiducialsSupplementLogic(ScriptedLoadableModuleLogic):
   def startCollection(self):
     logging.debug('startCollection')
     if (self.transformSourceNode and self.transformSourceNode and self.markupsFiducialNode):
-      self.markupsFiducialNode.SetAndObserveTransformNodeID(self.transformTargetNode.GetID())
       self.currentlyCollecting = True
       self.addObservers()
     else:
