@@ -1487,6 +1487,7 @@ class CathNavGuidelet(Guidelet):
       displayNode.SetOpacity(0.3) # Between 0-1, 1 being opaque
       slicer.mrmlScene.AddNode(displayNode)
       modelNode.SetAndObserveDisplayNodeID(displayNode.GetID())
+      modelNode.SetAndObserveTransformNodeID(self.needleToChest.GetID())
     return modelNode
   
   def getCatheterModelNameForPathNumber(self, pathNumber):
