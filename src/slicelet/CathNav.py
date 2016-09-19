@@ -965,12 +965,12 @@ class CathNavGuidelet(Guidelet):
     logging.debug('onCalibrationGuideClicked')
     self.startFixedPointCalibration('GuideTipToGuide', self.needleTipToNeedle, self.guideToChest, self.needleTipMarkups_Guide, self.guideTipToGuide)
     
-  def startPivotCalibration(self, toolToReferenceTransformName, toolToReferenceTransformNode, toolTipToToolTransformNode):
+  def startPivotCalibration(self, toolTipToToolTransformName, toolToReferenceTransformNode, toolTipToToolTransformNode):
     logging.debug('startPivotCalibration')
     self.calibrationNeedleButton.setEnabled(False)
     self.calibrationGuideButton.setEnabled(False)
     self.pivotCalibrationResultTargetNode =  toolTipToToolTransformNode
-    self.pivotCalibrationResultTargetName = toolToReferenceTransformName
+    self.pivotCalibrationResultTargetName = toolTipToToolTransformName
     self.pivotCalibrationLogic.SetAndObserveTransformNode( toolToReferenceTransformNode );
     self.calibrationStopTime=time.time()+float(self.parameterNode.GetParameter('PivotCalibrationDurationSec'))
     self.pivotCalibrationLogic.SetRecordingState(True)
@@ -1017,6 +1017,10 @@ class CathNavGuidelet(Guidelet):
     self.calibrationNeedleButton.setEnabled(True)
     self.calibrationGuideButton.setEnabled(True)
     self.pivotCalibrationLogic.ComputePivotCalibration()
+    if(self.pivotCalibrationLogic.GetPivotRMSE() <= 0.0): # This may be the only way to detect errors
+      self.countdownLabel.setText(self.pivotCalibrationLogic.GetErrorText())
+      self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
+      return
     if(self.pivotCalibrationLogic.GetPivotRMSE() >= float(self.parameterNode.GetParameter('PivotCalibrationErrorThresholdMm'))):
       self.countdownLabel.setText("Calibration failed, error = %f mm, please calibrate again!"  % self.pivotCalibrationLogic.GetPivotRMSE())
       self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
