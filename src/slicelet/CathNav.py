@@ -1456,7 +1456,6 @@ class CathNavGuidelet(Guidelet):
     storeRawFiducialsList = self.initializeFiducialList(storeRawFiducialsListName)
     self.copyFiducialsFromListToList(self.wirePoints_Needle,storeRawFiducialsList)
     self.wirePoints_Needle.RemoveAllMarkups()
-    self.pathCount = self.pathCount + 1
   
   def onWireMarkupsNodeModified(self, observer, eventid):
     if self.reconstructionThread:
