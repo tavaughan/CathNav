@@ -153,6 +153,7 @@ class CathNavGuidelet(Guidelet):
     self.tumorMarkups_NeedleObserver = None
     self.chestwallMarkups_ChestObserver = None
     self.wirePoints_NeedleObserver = None
+    self.wireToNeedleObserver = None
     self.pathCount = 0
     self.reconstructionThread = None
 
@@ -214,6 +215,7 @@ class CathNavGuidelet(Guidelet):
     self.guideToChest = self.initializeLinearTransform('GuideToChest')
     self.wireToChest = self.initializeLinearTransform('WireToChest')
     self.needleToChest = self.initializeLinearTransform('NeedleToChest')
+    self.wireToNeedle = self.initializeLinearTransform('WireToNeedle')
 
     logging.debug('Setup Models')
     self.guideModel_GuideTip = slicer.util.getNode('GuideModel')
@@ -246,7 +248,7 @@ class CathNavGuidelet(Guidelet):
 
     logging.debug('Setup Model Making - Seroma')
     self.tumorMarkups_Needle = self.initializeFiducialList('SeromaMarkups_Needle')
-    self.tumorMarkups_NeedleObserver = self.setAndObserveNode(self.tumorMarkups_Needle, self.tumorMarkups_NeedleObserver, self.onTumorMarkupsNodeModified)
+    self.tumorMarkups_NeedleObserver = self.observeMarkupsNode(self.tumorMarkups_Needle, self.tumorMarkups_NeedleObserver, self.updateTumorModel)
     self.tumorModel_Needle = slicer.util.getNode('SeromaModel')
     if not self.tumorModel_Needle:
       self.tumorModel_Needle = slicer.vtkMRMLModelNode()
@@ -262,7 +264,7 @@ class CathNavGuidelet(Guidelet):
       self.tumorModel_Needle.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
     logging.debug('Setup Model Making - Chestwall')
     self.chestwallMarkups_Chest = self.initializeFiducialList('ChestwallMarkups_Chest')
-    self.chestwallMarkups_ChestObserver = self.setAndObserveNode(self.chestwallMarkups_Chest, self.chestwallMarkups_ChestObserver, self.onChestwallMarkupsNodeModified)
+    self.chestwallMarkups_ChestObserver = self.observeMarkupsNode(self.chestwallMarkups_Chest, self.chestwallMarkups_ChestObserver, self.updateChestwallModel)
     self.chestwallModel_Chest = slicer.util.getNode('ChestWallModel')
     if not self.chestwallModel_Chest:
       self.chestwallModel_Chest = slicer.vtkMRMLModelNode()
@@ -1154,26 +1156,35 @@ class CathNavGuidelet(Guidelet):
     self.chestwallMarkupsDeleteLastButton.setEnabled(False)
     self.chestwallMarkupsDeleteAllButton.setEnabled(False)
 
-  def setAndObserveNode(self, node, existingMarkupsObserver, method):
-    logging.debug('setAndObserveNode')
+  def observeMarkupsNode(self, node, existingObserver, method):
+    logging.debug('observeMarkupsNode')
     if not node:
-      logging.error('No markups node provided. No observer set.')
+      logging.error('No node provided. No observer set.')
       return None
-    # Remove observer to old parameter node
-    if existingMarkupsObserver:
-      node.RemoveObserver(existingMarkupsObserver)
-    # Set and observe new parameter node
+    if existingObserver:
+      node.RemoveObserver(existingObserver)
     newMarkupsObserver = node.AddObserver(vtk.vtkCommand.ModifiedEvent, method)
     return newMarkupsObserver
 
-  def onTumorMarkupsNodeModified(self, observer, eventid):
-    logging.debug('onTumorMarkupsNodeModified')
+  def observeTransformNode(self, node, existingObserver, method):
+    logging.debug('observeTransformNode')
+    if not node:
+      logging.error('No node provided. No observer set.')
+      return None
+    if existingObserver:
+      node.RemoveObserver(existingObserver)
+    transformModifiedEvent = 15000
+    newMarkupsObserver = node.AddObserver(transformModifiedEvent, method)
+    return newMarkupsObserver
+
+  def updateTumorModel(self, observer, eventid):
+    logging.debug('updateTumorModel')
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.tumorMarkups_Needle.GetID())
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.tumorModel_Needle.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
 
-  def onChestwallMarkupsNodeModified(self, observer, eventid):
-    logging.debug('onChestwallMarkupsNodeModified')
+  def updateChestwallModel(self, observer, eventid):
+    logging.debug('updateChestwallModel')
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.chestwallMarkups_Chest.GetID())
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.chestwallModel_Chest.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
@@ -1421,21 +1432,18 @@ class CathNavGuidelet(Guidelet):
   
   def startPointCollection(self):
     logging.debug('startPointCollection')
-    self.collectFiducialsSupplementLogic.setMinimumAddDistanceMm(1) # collect points every 0.1 mm
-    self.collectFiducialsSupplementLogic.setTransformSourceNode(self.wireToChest)
-    self.collectFiducialsSupplementLogic.setTransformTargetNode(self.needleToChest)
-    self.collectFiducialsSupplementLogic.setMarkupsFiducialNode(self.wirePoints_Needle)
-    self.collectFiducialsSupplementLogic.setAllowPointRemovalsTrue()
-    self.collectFiducialsSupplementLogic.setForceConstantPointDistanceFalse()
-    self.collectFiducialsSupplementLogic.startCollection()
     self.wirePoints_Needle.RemoveAllMarkups()
-    self.wirePoints_NeedleObserver = self.setAndObserveNode(self.wirePoints_Needle, self.wirePoints_NeedleObserver, self.onWireMarkupsNodeModified)
+    self.wireToNeedleObserver = self.observeTransformNode(self.wireToNeedle, self.wireToNeedleObserver, self.collectWirePointInNeedleCoordinates)
+    self.wirePoints_NeedleObserver = self.observeMarkupsNode(self.wirePoints_Needle, self.wirePoints_NeedleObserver, self.reconstructCatheterPathOnThread)
     self.pathCount = self.pathCount + 1
     logging.debug('startPointCollection end')
     
   def stopPointCollection(self):
     # Stop collection
-    self.collectFiducialsSupplementLogic.stopCollection()
+    if self.wireToNeedle and self.wireToNeedleObserver:
+      self.wireToNeedle.RemoveObserver(self.wireToNeedleObserver)
+      self.wireToNeedleObserver = None
+    # Stop reconstruction on update
     if self.wirePoints_Needle and self.wirePoints_NeedleObserver:
       self.wirePoints_Needle.RemoveObserver(self.wirePoints_NeedleObserver)
       self.wirePoints_NeedleObserver = None
@@ -1456,8 +1464,17 @@ class CathNavGuidelet(Guidelet):
     storeRawFiducialsList = self.initializeFiducialList(storeRawFiducialsListName)
     self.copyFiducialsFromListToList(self.wirePoints_Needle,storeRawFiducialsList)
     self.wirePoints_Needle.RemoveAllMarkups()
+    
+  def collectWirePointInNeedleCoordinates(self, observer, eventid):
+    logging.debug('collectWirePointInNeedleCoordinates')
+    matrix = self.wireToNeedle.GetMatrixTransformToParent()
+    pointCoordinates = [0.0, 0.0, 0.0]
+    pointCoordinates[0] = matrix.GetElement(0, 3)
+    pointCoordinates[1] = matrix.GetElement(1, 3)
+    pointCoordinates[2] = matrix.GetElement(2, 3)
+    self.wirePoints_Needle.AddFiducialFromArray(pointCoordinates)
   
-  def onWireMarkupsNodeModified(self, observer, eventid):
+  def reconstructCatheterPathOnThread(self, observer, eventid):
     if self.reconstructionThread:
       if self.reconstructionThread.isAlive():
         return
@@ -1469,7 +1486,7 @@ class CathNavGuidelet(Guidelet):
     self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode.GetID())
     self.reconstructionThread = ReconstructionThread(self.MarkupsToModelCurveNode)
     self.reconstructionThread.start()
-    logging.debug('onWireMarkupsNodeModified - end')
+    logging.debug('reconstructCatheterPathOnThread - end')
     
   def getCatheterModelForPathNumber(self, pathNumber):
     nodeName = self.getCatheterModelNameForPathNumber(pathNumber)
