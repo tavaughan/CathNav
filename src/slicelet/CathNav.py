@@ -1016,9 +1016,9 @@ class CathNavGuidelet(Guidelet):
     self.pivotCalibrationLogic.SetRecordingState(False)
     self.calibrationNeedleButton.setEnabled(True)
     self.calibrationGuideButton.setEnabled(True)
-    self.pivotCalibrationLogic.ComputePivotCalibration()
-    if(self.pivotCalibrationLogic.GetPivotRMSE() <= 0.0): # This may be the only way to detect errors
-      self.countdownLabel.setText(self.pivotCalibrationLogic.GetErrorText())
+    calibrationSuccess = self.pivotCalibrationLogic.ComputePivotCalibration()
+    if not calibrationSuccess:
+      self.countdownLabel.setText("Calibration failed: " + self.pivotCalibrationLogic.GetErrorText())
       self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
       return
     if(self.pivotCalibrationLogic.GetPivotRMSE() >= float(self.parameterNode.GetParameter('PivotCalibrationErrorThresholdMm'))):
