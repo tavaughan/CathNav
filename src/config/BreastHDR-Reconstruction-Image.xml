@@ -2,7 +2,7 @@
 
   <DataCollection StartupDelaySec="1.0" >
     <DeviceSet 
-      Name="Brachytherapy Reconstruction Phantom L14 160609"
+      Name="Brachytherapy Reconstruction with L14 Image 160920"
       Description="EM sensors: 1 Probe, 2 Chest, 3 Needle, 4 Wire." 
     />
 
@@ -93,6 +93,7 @@
       <TransformNames>
         <Transform Name="NeedleToChest" />
         <Transform Name="WireToChest" />
+        <Transform Name="WireToNeedle" />
         <Transform Name="ImageToProbe" />
         <Transform Name="ImageToTransducer" />
         <Transform Name="TransducerToProbe" />

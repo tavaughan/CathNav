@@ -1281,6 +1281,8 @@ class CathNavGuidelet(Guidelet):
     self.planningLogic.setGridSizeRightMm(gridSizeRightMm)
     self.planningLogic.setGridSizeUpMm(gridSizeUpMm)
     self.planningLogic.setGridSizeDownMm(gridSizeDownMm)
+    self.planningLogic.setCylinderHeightMm(180) # 18 cm should be enough length to go through the breast
+    self.planningLogic.setCylinderRadiusMm(1)
     self.planningLogic.setTransformGridToTargetNode(self.gridToPlan)
     # update/create the grid
     self.planningLogic.createGrid()

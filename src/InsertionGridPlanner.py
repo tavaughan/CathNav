@@ -1,5 +1,6 @@
 from __main__ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
+import logging
 
 #
 # InsertionGridPlanner
@@ -122,6 +123,23 @@ class InsertionGridPlannerWidget(ScriptedLoadableModuleWidget):
     self.gridSpacingVerticalSlider.value = 10 # mm
     self.parametersFormLayout.addRow(self.gridSpacingVerticalLabel,self.gridSpacingVerticalSlider)
     
+    # Cylinder height
+    self.cylinderHeightLabel = qt.QLabel(qt.Qt.Horizontal,None)
+    self.cylinderHeightLabel.text = "Cylinder Height (mm): "
+    self.cylinderHeightSlider = slicer.qMRMLSliderWidget()
+    self.cylinderHeightSlider.minimum = 10 # mm
+    self.cylinderHeightSlider.maximum = 200 # mm
+    self.cylinderHeightSlider.value = 80 # mm
+    self.parametersFormLayout.addRow(self.cylinderHeightLabel,self.cylinderHeightSlider)
+    
+    self.cylinderRadiusLabel = qt.QLabel(qt.Qt.Horizontal,None)
+    self.cylinderRadiusLabel.text = "Cylinder Radius (mm): "
+    self.cylinderRadiusSlider = slicer.qMRMLSliderWidget()
+    self.cylinderRadiusSlider.minimum = 0.5 # mm
+    self.cylinderRadiusSlider.maximum = 5.0 # mm
+    self.cylinderRadiusSlider.value = 1.0 # mm
+    self.parametersFormLayout.addRow(self.cylinderRadiusLabel,self.cylinderRadiusSlider)
+    
     # Grid creation
     self.createGridButton = qt.QPushButton()
     self.createGridButton.text = "Create Grid"
@@ -141,7 +159,7 @@ class InsertionGridPlannerWidget(ScriptedLoadableModuleWidget):
     self.deleteGridButton.connect('clicked()', self.logic.deleteGrid)
 
   def createGridButtonPressed(self):
-    print "Create grid pressed"
+    logging.debug("Create grid pressed")
     self.logic.setTransformGridToTargetNode(self.transformNodeGridToTargetSelector.currentNode())
     if (self.gridPatternRectangularRadioButton.checked):
       self.logic.setGridPatternToRectangular()
@@ -153,6 +171,8 @@ class InsertionGridPlannerWidget(ScriptedLoadableModuleWidget):
     self.logic.setGridSizeDownMm(self.gridSizeDownSlider.value)
     self.logic.setGridSpacingHorizontalMm(self.gridSpacingHorizontalSlider.value)
     self.logic.setGridSpacingVerticalMm(self.gridSpacingVerticalSlider.value)
+    self.logic.setCylinderHeightMm(self.cylinderHeightSlider.value)
+    self.logic.setCylinderRadiusMm(self.cylinderRadiusSlider.value)
     self.logic.createGrid()
 
 #
@@ -174,54 +194,64 @@ class InsertionGridPlannerLogic(ScriptedLoadableModuleLogic):
     self.gridSizeDownMm = 0
     self.gridSpacingHorizontalMm = 10
     self.gridSpacingVerticalMm = 10
+    self.cylinderRadiusMm = 1
+    self.cylinderHeightMm = 80
     
     # outputs
     self.outputModelNode = None
     self.outputDisplayNode = None
       
   def setTransformGridToTargetNode(self,node):
-    print "setTransformGridToTargetNode"
+    logging.debug("setTransformGridToTargetNode")
     self.transformGridToTargetNode = node
     
   def setGridPatternToRectangular(self):
-    print "setPatternToRectangular"
+    logging.debug("setPatternToRectangular")
     self.gridPattern = self.gridPatternRectangular
   
   def setGridPatternToTriangular(self):
-    print "setPatternToTriangular"
+    logging.debug("setPatternToTriangular")
     self.gridPattern = self.gridPatternTriangular
     
   def setGridSizeLeftMm(self,sizeMm):
-    print "setGridSizeLeftMm"
+    logging.debug("setGridSizeLeftMm")
     self.gridSizeLeftMm = sizeMm
       
   def setGridSizeRightMm(self,sizeMm):
-    print "setGridSizeRightMm"
+    logging.debug("setGridSizeRightMm")
     self.gridSizeRightMm = sizeMm
       
   def setGridSizeUpMm(self,sizeMm):
-    print "setGridSizeUpMm"
+    logging.debug("setGridSizeUpMm")
     self.gridSizeUpMm = sizeMm
       
   def setGridSizeDownMm(self,sizeMm):
-    print "setGridSizeDownMm"
+    logging.debug("setGridSizeDownMm")
     self.gridSizeDownMm = sizeMm
     
   def setGridSpacingHorizontalMm(self,spacingMm):
-    print "setGridSpacingHorizontalMm"
+    logging.debug("setGridSpacingHorizontalMm")
     self.gridSpacingHorizontalMm = spacingMm
     
   def setGridSpacingVerticalMm(self,spacingMm):
-    print "setGridSpacingVerticalMm"
+    logging.debug("setGridSpacingVerticalMm")
     self.gridSpacingVerticalMm = spacingMm
     
+  def setCylinderHeightMm(self,heightMm):
+    logging.debug("setCylinderHeightMm")
+    self.cylinderHeightMm = heightMm
+    
+  def setCylinderRadiusMm(self,radiusMm):
+    logging.debug("setCylinderRadiusMm")
+    self.cylinderRadiusMm = radiusMm
+    
   def createGrid(self):
-    print "createGrid"
+    logging.debug("createGrid")
     self.deleteGrid()
     self.generateGridModel()
     
   def generateGridModel(self):
-    print "generateGridModel"
+    logging.debug("generateGridModel")
     polyData = vtk.vtkPolyData()
     if (self.gridPattern == self.gridPatternRectangular):
       polyData = self.generateGridPolyDataRectangular()
@@ -294,14 +324,12 @@ class InsertionGridPlannerLogic(ScriptedLoadableModuleLogic):
     return gridPolyData
     
   def generateCylinderPolyData(self,x,y):
-    cylinderHeightMm = 80
-    cylinderRadiusMm = 1
     cylinderSource = vtk.vtkCylinderSource()
-    cylinderSource.SetHeight(cylinderHeightMm)
-    cylinderSource.SetRadius(cylinderRadiusMm)
-    renderDepthMm = -cylinderHeightMm # negative because in graphics, negative is depth, positive goes toward the user
+    cylinderSource.SetHeight(self.cylinderHeightMm)
+    cylinderSource.SetRadius(self.cylinderRadiusMm)
+    offsetFromCenterMm = - ( self.cylinderHeightMm / 2.0 )
     transform = vtk.vtkTransform()
-    transform.Translate(x,y,renderDepthMm)
+    transform.Translate(x,y,offsetFromCenterMm)
     transform.RotateX(90) # rotate so that the cylinder follows the z axis
     transformFilter = vtk.vtkTransformFilter()
     transformFilter.SetTransform(transform)
@@ -311,7 +339,7 @@ class InsertionGridPlannerLogic(ScriptedLoadableModuleLogic):
     return polyData
     
   def addPolyDataToScene(self,polyData,name):
-    print "addPolyDataToScene"
+    logging.debug("addPolyDataToScene")
     self.outputDisplayNode = slicer.vtkMRMLModelDisplayNode()
     self.outputDisplayNode.SetName(name+"Display")
     self.outputDisplayNode.SetColor(0,0,1.0)
@@ -326,7 +354,7 @@ class InsertionGridPlannerLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.AddNode(self.outputModelNode)
       
   def deleteGrid(self):
-    print "deleteGrid"
+    logging.debug("deleteGrid")
     if self.outputModelNode:
       slicer.mrmlScene.RemoveNode(self.outputModelNode)
       self.outputModelNode = None
