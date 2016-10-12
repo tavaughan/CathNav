@@ -76,12 +76,16 @@ class CathNavLogic(GuideletLogic):
     settingList = {'TipToSurfaceDistanceCrossHair' : 'True',
                    'TipToSurfaceDistanceText' : 'True',
                    'TipToSurfaceDistanceTrajectory' : 'True',
-                   'NeedleModelToNeedleTip' : '0 1 0 0 0 0 1 0 1 0 0 0 0 0 0 1',
-                   'CauteryModelToCauteryTip' : '0 0 1 0 0 -1 0 0 1 0 0 0 0 0 0 1',
-                   'PivotCalibrationErrorThresholdMm' :  '0.9',
+                   'NeedleTipToNeedle' : '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1',
+                   'GuideTipToGuide' : '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1',
+                   'NeedleShaftToNeedleTip' : '0 1 0 0 0 0 1 0 1 0 0 0 0 0 0 1',
+                   'GuideShaftToGuideTip' : '0 1 0 0 0 0 1 0 1 0 0 0 0 0 0 1',
+                   'PivotCalibrationErrorThresholdMm' : '0.9',
                    'PivotCalibrationDurationSec' : '15',
-                   'FixedPointCalibrationErrorThresholdMm' :  '5.0',
-                   'FixedPointCalibrationDurationSec' : '5',
+                   'SpinCalibrationErrorThresholdDeg' : '1.0',
+                   'SpinCalibrationDurationSec' : '15',
+                   'FixedPointCalibrationErrorThresholdMm' : '5.0',
+                   'FixedPointCalibrationDurationSec' : '15',
                    'TestMode' : 'False',
                    'RecordingFilenamePrefix' : 'CathNavRecording-',
                    'SavedScenesDirectory': defaultSavePathOfCathNav,#overwrites the default setting param of base
@@ -134,7 +138,8 @@ class CathNavGuidelet(Guidelet):
   # Calibration
   currentCalibration = 0
   currentCalibration_PIVOT = 0
-  currentCalibration_FIXED_POINT = 1
+  currentCalibration_SPIN = 1
+  currentCalibration_FIXED_POINT = 2
   fixedPointCalibrationMarkups = None
   fixedPointCalibrationTargetTransformNode = None
   fixedPointCalibrationTargetTransformName = None
@@ -150,9 +155,9 @@ class CathNavGuidelet(Guidelet):
     self.mainWindow.setWindowTitle('HDR Catheter navigation')
     self.mainWindow.windowIcon = qt.QIcon(moduleDirectoryPath + '/Resources/Icons/CathNav.png')
     
-    self.tumorMarkups_NeedleObserver = None
+    self.seromaMarkups_SeromaObserver = None
     self.chestwallMarkups_ChestObserver = None
-    self.wirePoints_NeedleObserver = None
+    self.wirePoints_SeromaObserver = None
     self.wireToNeedleObserver = None
     self.pathCount = 0
     self.reconstructionThread = None
@@ -169,8 +174,8 @@ class CathNavGuidelet(Guidelet):
   def cleanup(self):#common
     Guidelet.cleanup(self)
     logging.debug('cleanup')
-    if self.tumorMarkups_NeedleObserver:
-      self.tumorMarkups_Needle.RemoveObserver(self.tumorMarkups_NeedleObserver)
+    if self.seromaMarkups_SeromaObserver:
+      self.seromaMarkups_Seroma.RemoveObserver(self.seromaMarkups_SeromaObserver)
     if self.chestwallMarkups_Chest:
       self.chestwallMarkups_Chest.RemoveObserver(self.chestwallMarkups_ChestObserver)
     
@@ -187,26 +192,19 @@ class CathNavGuidelet(Guidelet):
     self.loadLinearTransformFromSettings(self.guideTipToGuide)
     self.needleTipToNeedle = self.initializeLinearTransform('NeedleTipToNeedle')
     self.loadLinearTransformFromSettings(self.needleTipToNeedle)
-    self.guideModelToGuideTip = self.initializeLinearTransform('GuideModelToGuideTip')
-    guideModelToGuideTipMatrix = [ 0, 1, 0, 0,
-                                   0, 0, 1, 0,
-                                   1, 0, 0, 0,
-                                   0, 0, 0, 1 ]
-    self.setLinearTransform(self.guideModelToGuideTip, guideModelToGuideTipMatrix)
-    self.guideCameraToGuideModel = self.initializeLinearTransform('GuideCameraToGuideModel')
-    guideCameraToGuideModelMatrix = [ 0, 1, 0, 0,
-                                      1, 0, 0, 0,
+    self.guideShaftToGuideTip = self.initializeLinearTransform('GuideShaftToGuideTip')
+    self.loadLinearTransformFromSettings(self.guideShaftToGuideTip)
+    self.needleShaftToNeedleTip = self.initializeLinearTransform('NeedleShaftToNeedleTip')
+    self.loadLinearTransformFromSettings(self.needleShaftToNeedleTip)
+    self.guideCameraToGuideShaft = self.initializeLinearTransform('GuideCameraToGuideShaft')
+    guideCameraToGuideShaftMatrix = [ 1, 0, 0, 0,
+                                      0,-1, 0, 0,
                                       0, 0,-1, 0,
                                       0, 0, 0, 1 ]
-    self.setLinearTransform(self.guideCameraToGuideModel, guideCameraToGuideModelMatrix)      
-    self.needleModelToNeedleTip = self.initializeLinearTransform('NeedleModelToNeedleTip')
-    needleModelToNeedleTipMatrix = [ 0, 1, 0, 0,
-                                     0, 0, 1, 0,
-                                     1, 0, 0, 0,
-                                     0, 0, 0, 1 ]
-    self.setLinearTransform(self.needleModelToNeedleTip, needleModelToNeedleTipMatrix)
+    self.setLinearTransform(self.guideCameraToGuideShaft, guideCameraToGuideShaftMatrix)
     self.referenceToRas = self.initializeLinearTransform('ChestToRas')
     self.needleToGuide = self.initializeLinearTransform('NeedleToGuide')
+    self.seromaToNeedleTip = self.initializeLinearTransform('SeromaToNeedleTip')
     self.planToNeedle = self.initializeLinearTransform('PlanToNeedle')
     self.gridToPlan = self.initializeLinearTransform('GridToPlan')
     self.gridCameraToGrid = self.initializeLinearTransform('GridCameraToGrid')
@@ -218,26 +216,26 @@ class CathNavGuidelet(Guidelet):
     self.wireToNeedle = self.initializeLinearTransform('WireToNeedle')
 
     logging.debug('Setup Models')
-    self.guideModel_GuideTip = slicer.util.getNode('GuideModel')
-    if not self.guideModel_GuideTip:
+    self.guideModel_GuideShaft = slicer.util.getNode('GuideModel_GuideShaft')
+    if not self.guideModel_GuideShaft:
       moduleDirectoryPath = slicer.modules.cathnav.path.replace('CathNav.py', '')
       slicer.util.loadModel(qt.QDir.toNativeSeparators(moduleDirectoryPath + 'models/catheterGuide.stl'))
-      self.guideModel_GuideTip=slicer.util.getNode(pattern="catheterGuide")
-      self.guideModel_GuideTip.GetDisplayNode().SetColor(1.0, 1.0, 0)
-      self.guideModel_GuideTip.SetName("GuideModel")
-    self.needleModel_NeedleTip = slicer.util.getNode('NeedleModel')
-    if not self.needleModel_NeedleTip:
+      self.guideModel_GuideShaft=slicer.util.getNode(pattern="catheterGuide")
+      self.guideModel_GuideShaft.GetDisplayNode().SetColor(1.0, 1.0, 0)
+      self.guideModel_GuideShaft.SetName("GuideModel_GuideShaft")
+    self.needleModel_NeedleShaft = slicer.util.getNode('NeedleModel_NeedleShaft')
+    if not self.needleModel_NeedleShaft:
       slicer.modules.createmodels.logic().CreateNeedle(80,0.5,0,0)
-      self.needleModel_NeedleTip=slicer.util.getNode(pattern="NeedleModel")
-      self.needleModel_NeedleTip.GetDisplayNode().SetColor(0.333333, 1.0, 1.0)
-      self.needleModel_NeedleTip.SetName("NeedleModel")
-      self.needleModel_NeedleTip.GetDisplayNode().SliceIntersectionVisibilityOn()
-    self.wireModel_Wire = slicer.util.getNode('WireModel')
+      self.needleModel_NeedleShaft=slicer.util.getNode(pattern="NeedleModel")
+      self.needleModel_NeedleShaft.GetDisplayNode().SetColor(0.333333, 1.0, 1.0)
+      self.needleModel_NeedleShaft.SetName("NeedleModel_NeedleShaft")
+      self.needleModel_NeedleShaft.GetDisplayNode().SliceIntersectionVisibilityOn()
+    self.wireModel_Wire = slicer.util.getNode('WireModel_Wire')
     if not self.wireModel_Wire:
       slicer.modules.createmodels.logic().CreateSphere(0.75)
       self.wireModel_Wire=slicer.util.getNode(pattern="SphereModel")
       self.wireModel_Wire.GetDisplayNode().SetColor(1.0, 0.5, 0.25)
-      self.wireModel_Wire.SetName("WireModel")
+      self.wireModel_Wire.SetName("WireModel_Wire")
       self.wireModel_Wire.GetDisplayNode().SliceIntersectionVisibilityOn()
     
     logging.debug('Setup Guidelet')
@@ -247,13 +245,13 @@ class CathNavGuidelet(Guidelet):
     self.needleTipMarkups_Guide = self.initializeFiducialList('NeedleTipMarkups_Guide')
 
     logging.debug('Setup Model Making - Seroma')
-    self.tumorMarkups_Needle = self.initializeFiducialList('SeromaMarkups_Needle')
-    self.tumorMarkups_NeedleObserver = self.observeMarkupsNode(self.tumorMarkups_Needle, self.tumorMarkups_NeedleObserver, self.updateTumorModel)
-    self.tumorModel_Needle = slicer.util.getNode('SeromaModel')
-    if not self.tumorModel_Needle:
-      self.tumorModel_Needle = slicer.vtkMRMLModelNode()
-      self.tumorModel_Needle.SetName("SeromaModel")
-      slicer.mrmlScene.AddNode(self.tumorModel_Needle)
+    self.seromaMarkups_Seroma = self.initializeFiducialList('SeromaMarkups_Seroma')
+    self.seromaMarkups_SeromaObserver = self.observeMarkupsNode(self.seromaMarkups_Seroma, self.seromaMarkups_SeromaObserver, self.onTumorMarkupsModified)
+    self.seromaModel_Seroma = slicer.util.getNode('SeromaModel')
+    if not self.seromaModel_Seroma:
+      self.seromaModel_Seroma = slicer.vtkMRMLModelNode()
+      self.seromaModel_Seroma.SetName("SeromaModel")
+      slicer.mrmlScene.AddNode(self.seromaModel_Seroma)
       modelDisplayNode = slicer.vtkMRMLModelDisplayNode()
       modelDisplayNode.SetColor(1,0,0) # Red
       modelDisplayNode.BackfaceCullingOff()
@@ -261,10 +259,10 @@ class CathNavGuidelet(Guidelet):
       modelDisplayNode.SetSliceIntersectionThickness(4)
       modelDisplayNode.SetOpacity(0.3)
       slicer.mrmlScene.AddNode(modelDisplayNode)
-      self.tumorModel_Needle.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
+      self.seromaModel_Seroma.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
     logging.debug('Setup Model Making - Chestwall')
     self.chestwallMarkups_Chest = self.initializeFiducialList('ChestwallMarkups_Chest')
-    self.chestwallMarkups_ChestObserver = self.observeMarkupsNode(self.chestwallMarkups_Chest, self.chestwallMarkups_ChestObserver, self.updateChestwallModel)
+    self.chestwallMarkups_ChestObserver = self.observeMarkupsNode(self.chestwallMarkups_Chest, self.chestwallMarkups_ChestObserver, self.onChestwallMarkupsModified)
     self.chestwallModel_Chest = slicer.util.getNode('ChestWallModel')
     if not self.chestwallModel_Chest:
       self.chestwallModel_Chest = slicer.vtkMRMLModelNode()
@@ -280,7 +278,7 @@ class CathNavGuidelet(Guidelet):
       self.chestwallModel_Chest.SetAndObserveDisplayNodeID(modelDisplayNode.GetID())
     
     logging.debug('Setup Catheter Path Reconstruction')
-    self.wirePoints_Needle = self.initializeFiducialList('WirePoints_Needle')
+    self.wirePoints_Seroma = self.initializeFiducialList('WirePoints_Seroma')
     self.pathCount = 0
 
     logging.debug('Setup Transform Tree')
@@ -291,18 +289,19 @@ class CathNavGuidelet(Guidelet):
     self.wireModel_Wire.SetAndObserveTransformNodeID(self.wireToChest.GetID())
     self.guideToChest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     self.guideTipToGuide.SetAndObserveTransformNodeID(self.guideToChest.GetID())
-    self.guideModelToGuideTip.SetAndObserveTransformNodeID(self.guideTipToGuide.GetID())
-    self.guideCameraToGuideModel.SetAndObserveTransformNodeID(self.guideModelToGuideTip.GetID())
-    self.guideModel_GuideTip.SetAndObserveTransformNodeID(self.guideModelToGuideTip.GetID())
+    self.guideShaftToGuideTip.SetAndObserveTransformNodeID(self.guideTipToGuide.GetID())
+    self.guideCameraToGuideShaft.SetAndObserveTransformNodeID(self.guideShaftToGuideTip.GetID())
+    self.guideModel_GuideShaft.SetAndObserveTransformNodeID(self.guideShaftToGuideTip.GetID())
     self.needleToChest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToChest.GetID())
-    self.needleModelToNeedleTip.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
-    self.needleModel_NeedleTip.SetAndObserveTransformNodeID(self.needleModelToNeedleTip.GetID())
+    self.needleShaftToNeedleTip.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
+    self.needleModel_NeedleShaft.SetAndObserveTransformNodeID(self.needleShaftToNeedleTip.GetID())
+    self.seromaToNeedleTip.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
     self.planToNeedle.SetAndObserveTransformNodeID(self.needleToChest.GetID())
     self.gridToPlan.SetAndObserveTransformNodeID(self.planToNeedle.GetID())
     self.gridCameraToGrid.SetAndObserveTransformNodeID(self.gridToPlan.GetID())
-    self.tumorModel_Needle.SetAndObserveTransformNodeID(self.needleToChest.GetID())
-    self.tumorMarkups_Needle.SetAndObserveTransformNodeID(self.needleToChest.GetID())
+    self.seromaModel_Seroma.SetAndObserveTransformNodeID(self.seromaToNeedleTip.GetID())
+    self.seromaMarkups_Seroma.SetAndObserveTransformNodeID(self.seromaToNeedleTip.GetID())
     self.chestwallModel_Chest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     self.chestwallMarkups_Chest.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
 
@@ -405,19 +404,25 @@ class CathNavGuidelet(Guidelet):
     self.calibrationCollapsibleButton = ctk.ctkCollapsibleButton()
     
     self.calibrationCollapsibleButton.setProperty('collapsedHeight', 20)
-    self.calibrationCollapsibleButton.text = 'Tool calibration'
+    self.calibrationCollapsibleButton.text = 'Calibration'
     self.sliceletPanelLayout.addWidget(self.calibrationCollapsibleButton)
 
     self.calibrationLayout = qt.QFormLayout(self.calibrationCollapsibleButton)
     self.calibrationLayout.setContentsMargins(12, 4, 4, 4)
     self.calibrationLayout.setSpacing(4)
 
-    self.calibrationNeedleButton = qt.QPushButton('Start needle calibration')
-    self.calibrationLayout.addRow(self.calibrationNeedleButton)
+    self.calibrationNeedleTipButton = qt.QPushButton('Start needle tip calibration')
+    self.calibrationLayout.addRow(self.calibrationNeedleTipButton)
 
-    self.calibrationGuideButton = qt.QPushButton('Start guide calibration')
-    self.calibrationLayout.addRow(self.calibrationGuideButton)
+    self.calibrationGuideTipButton = qt.QPushButton('Start guide tip calibration')
+    self.calibrationLayout.addRow(self.calibrationGuideTipButton)
+    
+    self.calibrationNeedleShaftButton = qt.QPushButton('Start needle shaft calibration')
+    self.calibrationLayout.addRow(self.calibrationNeedleShaftButton)
 
+    self.calibrationGuideShaftButton = qt.QPushButton('Start guide shaft calibration')
+    self.calibrationLayout.addRow(self.calibrationGuideShaftButton)
+    
     self.countdownLabel = qt.QLabel()
     self.calibrationLayout.addRow(self.countdownLabel)
 
@@ -773,8 +778,10 @@ class CathNavGuidelet(Guidelet):
     # calibration panel
     self.pivotCalibrationLogic=slicer.modules.pivotcalibration.logic()
     
-    self.calibrationGuideButton.connect('clicked()', self.onCalibrationGuideClicked)
-    self.calibrationNeedleButton.connect('clicked()', self.onCalibrationNeedleClicked)
+    self.calibrationNeedleTipButton.connect('clicked()', self.onCalibrationNeedleTipClicked)
+    self.calibrationGuideTipButton.connect('clicked()', self.onCalibrationGuideTipClicked)
+    self.calibrationNeedleShaftButton.connect('clicked()', self.onCalibrationNeedleShaftClicked)
+    self.calibrationGuideShaftButton.connect('clicked()', self.onCalibrationGuideShaftClicked)
     
     self.calibrationSamplingTimer.connect('timeout()',self.onCalibrationSamplingTimeout)
     
@@ -865,9 +872,9 @@ class CathNavGuidelet(Guidelet):
     Guidelet.disconnect(self)
       
     # Remove observer to old parameter node
-    if self.tumorMarkups_Needle and self.tumorMarkups_NeedleObserver:
-      self.tumorMarkups_Needle.RemoveObserver(self.tumorMarkups_NeedleObserver)
-      self.tumorMarkups_NeedleObserver = None
+    if self.seromaMarkups_Seroma and self.seromaMarkups_SeromaObserver:
+      self.seromaMarkups_Seroma.RemoveObserver(self.seromaMarkups_SeromaObserver)
+      self.seromaMarkups_SeromaObserver = None
 
     if self.chestwallMarkups_Chest and self.chestwallMarkups_ChestObserver:
       self.chestwallMarkups_Chest.RemoveObserver(self.chestwallMarkups_ChestObserver)
@@ -877,8 +884,10 @@ class CathNavGuidelet(Guidelet):
     self.navigationCollapsibleButton.disconnect('toggled(bool)', self.onNavigationPanelToggled)
 
     # calibration panel
-    self.calibrationGuideButton.disconnect('clicked()', self.onCalibrationGuideClicked)
-    self.calibrationNeedleButton.disconnect('clicked()', self.onCalibrationNeedleClicked)
+    self.calibrationNeedleTipButton.disconnect('clicked()', self.onCalibrationNeedleTipClicked)
+    self.calibrationGuideTipButton.disconnect('clicked()', self.onCalibrationGuideTipClicked)
+    self.calibrationNeedleShaftButton.disconnect('clicked()', self.onCalibrationNeedleShaftClicked)
+    self.calibrationGuideShaftButton.disconnect('clicked()', self.onCalibrationGuideShaftClicked)
 
     self.calibrationSamplingTimer.disconnect('timeout()',self.onCalibrationSamplingTimeout)
     
@@ -959,30 +968,48 @@ class CathNavGuidelet(Guidelet):
 
   # ========== CALIBRATION PANEL FUNCTIONS ===========
 
-  def onCalibrationNeedleClicked(self):
-    logging.debug('onCalibrationNeedleClicked')
+  def onCalibrationNeedleTipClicked(self):
+    logging.debug('onCalibrationNeedleTipClicked')
+    self.currentCalibration = self.currentCalibration_PIVOT
     self.startPivotCalibration('NeedleTipToNeedle', self.needleToGuide, self.needleTipToNeedle)
     
-  def onCalibrationGuideClicked(self):
-    logging.debug('onCalibrationGuideClicked')
+  def onCalibrationGuideTipClicked(self):
+    logging.debug('onCalibrationGuideTipClicked')
+    self.currentCalibration = self.currentCalibration_FIXED_POINT
     self.startFixedPointCalibration('GuideTipToGuide', self.needleTipToNeedle, self.guideToChest, self.needleTipMarkups_Guide, self.guideTipToGuide)
+    
+  def onCalibrationNeedleShaftClicked(self):
+    logging.debug('onCalibrationNeedleShaftClicked')
+    self.currentCalibration = self.currentCalibration_SPIN
+    self.startPivotCalibration('NeedleShaftToNeedleTip', self.needleToGuide, self.needleShaftToNeedleTip)
+    
+  def onCalibrationGuideShaftClicked(self):
+    logging.debug('onCalibrationGuideShaftClicked')
+    self.currentCalibration = self.currentCalibration_SPIN
+    self.startPivotCalibration('GuideShaftToGuideTip', self.guideToNeedle, self.guideShaftToGuideTip)
     
   def startPivotCalibration(self, toolTipToToolTransformName, toolToReferenceTransformNode, toolTipToToolTransformNode):
     logging.debug('startPivotCalibration')
-    self.calibrationNeedleButton.setEnabled(False)
-    self.calibrationGuideButton.setEnabled(False)
+    self.calibrationNeedleTipButton.setEnabled(False)
+    self.calibrationGuideTipButton.setEnabled(False)
+    self.calibrationNeedleShaftButton.setEnabled(False)
+    self.calibrationGuideShaftButton.setEnabled(False)
     self.pivotCalibrationResultTargetNode =  toolTipToToolTransformNode
     self.pivotCalibrationResultTargetName = toolTipToToolTransformName
     self.pivotCalibrationLogic.SetAndObserveTransformNode( toolToReferenceTransformNode );
-    self.calibrationStopTime=time.time()+float(self.parameterNode.GetParameter('PivotCalibrationDurationSec'))
+    if (self.currentCalibration == self.currentCalibration_PIVOT):
+      self.calibrationStopTime=time.time()+float(self.parameterNode.GetParameter('PivotCalibrationDurationSec'))
+    elif (self.currentCalibration == self.currentCalibration_SPIN):
+      self.calibrationStopTime=time.time()+float(self.parameterNode.GetParameter('SpinCalibrationDurationSec'))
     self.pivotCalibrationLogic.SetRecordingState(True)
     self.onCalibrationSamplingTimeout()
-    self.currentCalibration = self.currentCalibration_PIVOT
     
   def startFixedPointCalibration(self, toolPointToToolSensorTransformName, pointerTipTransformNode, toolSensorTransformNode, pointerTipMarkups_toolSensorNode, toolPointToToolSensorTransformNode):
     logging.debug('startFixedPointCalibration')
-    self.calibrationNeedleButton.setEnabled(False)
-    self.calibrationGuideButton.setEnabled(False)
+    self.calibrationNeedleTipButton.setEnabled(False)
+    self.calibrationGuideTipButton.setEnabled(False)
+    self.calibrationNeedleShaftButton.setEnabled(False)
+    self.calibrationGuideShaftButton.setEnabled(False)
     pointerTipMarkups_toolSensorNode.RemoveAllMarkups()
     self.collectFiducialsSupplementLogic.setMinimumAddDistanceMm(0)
     self.collectFiducialsSupplementLogic.setTransformSourceNode(pointerTipTransformNode)
@@ -992,7 +1019,6 @@ class CathNavGuidelet(Guidelet):
     self.collectFiducialsSupplementLogic.setForceConstantPointDistanceFalse()
     self.collectFiducialsSupplementLogic.startCollection()
     self.calibrationStopTime=time.time()+float(self.parameterNode.GetParameter('FixedPointCalibrationDurationSec'))
-    self.currentCalibration = self.currentCalibration_FIXED_POINT
     self.fixedPointCalibrationMarkups = pointerTipMarkups_toolSensorNode
     self.fixedPointCalibrationTargetTransformNode = toolPointToToolSensorTransformNode
     self.fixedPointCalibrationTargetTransformName = toolPointToToolSensorTransformName
@@ -1005,10 +1031,10 @@ class CathNavGuidelet(Guidelet):
       self.calibrationSamplingTimer.start()
     else:
       # calibration completed
-      if (self.currentCalibration == self.currentCalibration_FIXED_POINT):
-        self.onStopFixedPointCalibration()
-      elif (self.currentCalibration == self.currentCalibration_PIVOT):
+      if (self.currentCalibration == self.currentCalibration_PIVOT or self.currentCalibration == self.currentCalibration_SPIN):
         self.onStopPivotCalibration()
+      elif (self.currentCalibration == self.currentCalibration_FIXED_POINT):
+        self.onStopFixedPointCalibration()
       else: # should never happen
         logging.error("Unrecognized current calibration type. Valid types are pivot (0) and fixed point (1). No calibration performed")
         self.countdownLabel.setText("An internal error occurred. No calibration performed")        
@@ -1016,31 +1042,69 @@ class CathNavGuidelet(Guidelet):
   def onStopPivotCalibration(self):
     logging.debug('onStopPivotCalibration')
     self.pivotCalibrationLogic.SetRecordingState(False)
-    self.calibrationNeedleButton.setEnabled(True)
-    self.calibrationGuideButton.setEnabled(True)
-    autoFlipFlag = False
-    calibrationSuccess = self.pivotCalibrationLogic.ComputePivotCalibration(autoFlipFlag)
-    if not calibrationSuccess:
-      self.countdownLabel.setText("Calibration failed: " + self.pivotCalibrationLogic.GetErrorText())
+    self.calibrationNeedleTipButton.setEnabled(True)
+    self.calibrationGuideTipButton.setEnabled(True)
+    self.calibrationNeedleShaftButton.setEnabled(True)
+    self.calibrationGuideShaftButton.setEnabled(True)
+    snapAxesFlag = False
+    autoFlipFlag = True
+    tooltipToToolMatrix = vtk.vtkMatrix4x4() # store result here
+    if (self.currentCalibration == self.currentCalibration_PIVOT):
+      calibrationSuccess = self.pivotCalibrationLogic.ComputePivotCalibration() #autoFlipFlag
+      if not calibrationSuccess:
+        self.countdownLabel.setText("Calibration failed: " + self.pivotCalibrationLogic.GetErrorText())
+        self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
+        return
+      if(self.pivotCalibrationLogic.GetPivotRMSE() >= float(self.parameterNode.GetParameter('PivotCalibrationErrorThresholdMm'))):
+        self.countdownLabel.setText("Calibration failed, error = %f mm, please calibrate again!"  % self.pivotCalibrationLogic.GetPivotRMSE())
+        self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
+        return
+      self.pivotCalibrationLogic.GetToolTipToToolTranslation(tooltipToToolMatrix)
+      errorMm = self.pivotCalibrationLogic.GetPivotRMSE()
+      self.countdownLabel.setText("Calibration completed, error = %f mm" % errorMm)
+      logging.debug("Pivot calibration completed. Tool: {0}. RMSE = {1} mm".format(self.pivotCalibrationResultTargetNode.GetName(), errorMm))
+    elif (self.currentCalibration == self.currentCalibration_SPIN):
+      calibrationSuccess = self.pivotCalibrationLogic.ComputeSpinCalibration(snapAxesFlag) #autoFlipFlag
+      if not calibrationSuccess:
+        self.countdownLabel.setText("Calibration failed: " + self.pivotCalibrationLogic.GetErrorText())
+        self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
+        return
+      errorDeg = numpy.arccos( 1.0 - self.pivotCalibrationLogic.GetSpinRMSE()**2 / 2.0 ) * 180 / numpy.pi 
+      if(errorDeg >= float(self.parameterNode.GetParameter('SpinCalibrationErrorThresholdDeg'))):
+        self.countdownLabel.setText("Calibration failed, error = %f degrees, please calibrate again!"  % self.pivotCalibrationLogic.GetPivotRMSE())
+        self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
+        return
+      self.pivotCalibrationLogic.GetToolTipToToolRotation(tooltipToToolMatrix)
+      # below I have my temporary solution to the "flipping" issue
+      # The axis can point in one of two ways. The y-axis of the sensor
+      # should be aligned with the shaft of the needle (z-axis). So
+      # We check the corresponding element in the matrix and flip
+      # around the calibrated x-axis if necessary.
+      if (tooltipToToolMatrix.GetElement(2, 1) > 0): # should be negative
+        # below is an inline rotation. Just invert the y and z axes
+        tooltipToToolMatrix.SetElement(1, 0, -tooltipToToolMatrix.GetElement(1, 0))
+        tooltipToToolMatrix.SetElement(1, 1, -tooltipToToolMatrix.GetElement(1, 1))
+        tooltipToToolMatrix.SetElement(1, 2, -tooltipToToolMatrix.GetElement(1, 2))
+        tooltipToToolMatrix.SetElement(2, 0, -tooltipToToolMatrix.GetElement(2, 0))
+        tooltipToToolMatrix.SetElement(2, 1, -tooltipToToolMatrix.GetElement(2, 1))
+        tooltipToToolMatrix.SetElement(2, 2, -tooltipToToolMatrix.GetElement(2, 2))
+      self.countdownLabel.setText("Calibration completed, error = %f degrees" % errorDeg)
+      logging.debug("Spin calibration completed. Tool: {0}. RMSE = {1} degrees".format(self.pivotCalibrationResultTargetNode.GetName(), errorDeg))
+    else:
+      self.countdownLabel.setText("Calibration failed: Unrecognized calibration type.")
       self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
       return
-    if(self.pivotCalibrationLogic.GetPivotRMSE() >= float(self.parameterNode.GetParameter('PivotCalibrationErrorThresholdMm'))):
-      self.countdownLabel.setText("Calibration failed, error = %f mm, please calibrate again!"  % self.pivotCalibrationLogic.GetPivotRMSE())
-      self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
-      return
-    tooltipToToolMatrix = vtk.vtkMatrix4x4()
-    self.pivotCalibrationLogic.GetToolTipToToolMatrix(tooltipToToolMatrix)
     self.pivotCalibrationLogic.ClearToolToReferenceMatrices()
     self.pivotCalibrationResultTargetNode.SetMatrixTransformToParent(tooltipToToolMatrix)
     self.logic.writeTransformToSettings(self.pivotCalibrationResultTargetName, tooltipToToolMatrix, self.configurationName)
-    self.countdownLabel.setText("Calibration completed, error = %f mm" % self.pivotCalibrationLogic.GetPivotRMSE())
-    logging.debug("Pivot calibration completed. Tool: {0}. RMSE = {1} mm".format(self.pivotCalibrationResultTargetNode.GetName(), self.pivotCalibrationLogic.GetPivotRMSE()))
-    
+
   def onStopFixedPointCalibration(self):
     logging.debug('onStopFixedPointCalibration')
     self.collectFiducialsSupplementLogic.stopCollection()
-    self.calibrationNeedleButton.setEnabled(True)
-    self.calibrationGuideButton.setEnabled(True)
+    self.calibrationNeedleTipButton.setEnabled(True)
+    self.calibrationGuideTipButton.setEnabled(True)
+    self.calibrationNeedleShaftButton.setEnabled(True)
+    self.calibrationGuideShaftButton.setEnabled(True)
     vectorToolPointToToolSensorMm = self.computeAverageOfMarkups(self.fixedPointCalibrationMarkups)
     rmseToolSensorToToolPointMm = self.computeRMSEOfPointToMarkups(vectorToolPointToToolSensorMm,self.fixedPointCalibrationMarkups)
     if (rmseToolSensorToToolPointMm >= float(self.parameterNode.GetParameter('FixedPointCalibrationErrorThresholdMm'))):
@@ -1106,7 +1170,7 @@ class CathNavGuidelet(Guidelet):
       # activate placement mode
       selectionNode = slicer.app.applicationLogic().GetSelectionNode()
       selectionNode.SetReferenceActivePlaceNodeClassName("vtkMRMLMarkupsFiducialNode")
-      selectionNode.SetActivePlaceNodeID(self.tumorMarkups_Needle.GetID())
+      selectionNode.SetActivePlaceNodeID(self.seromaMarkups_Seroma.GetID())
       interactionNode.SetPlaceModePersistence(1)
       interactionNode.SetCurrentInteractionMode(interactionNode.Place)
       self.chestwallMarkupsPlaceButton.setChecked(0)
@@ -1116,15 +1180,15 @@ class CathNavGuidelet(Guidelet):
 
   def onTumorMarkupsDeleteLastClicked(self):
     logging.debug('onTumorMarkupsDeleteLastClicked')
-    numberOfPoints = self.tumorMarkups_Needle.GetNumberOfFiducials()
-    self.tumorMarkups_Needle.RemoveMarkup(numberOfPoints-1)
+    numberOfPoints = self.seromaMarkups_Seroma.GetNumberOfFiducials()
+    self.seromaMarkups_Seroma.RemoveMarkup(numberOfPoints-1)
     if numberOfPoints<=1:
       self.tumorMarkupsDeleteLastButton.setEnabled(False)
       self.tumorMarkupsDeleteAllButton.setEnabled(False)
 
   def onTumorMarkupsDeleteAllClicked(self):
     logging.debug('onTumorMarkupsDeleteAllClicked')
-    self.tumorMarkups_Needle.RemoveAllMarkups()
+    self.seromaMarkups_Seroma.RemoveAllMarkups()
     self.tumorMarkupsDeleteLastButton.setEnabled(False)
     self.tumorMarkupsDeleteAllButton.setEnabled(False)
 
@@ -1178,14 +1242,22 @@ class CathNavGuidelet(Guidelet):
     newMarkupsObserver = node.AddObserver(transformModifiedEvent, method)
     return newMarkupsObserver
 
-  def updateTumorModel(self, observer, eventid):
-    logging.debug('updateTumorModel')
-    self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.tumorMarkups_Needle.GetID())
-    self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.tumorModel_Needle.GetID())
+  def onTumorMarkupsModified(self, observer, eventid):
+    logging.debug('onTumorMarkupsModified')
+    numberOfPoints = self.seromaMarkups_Seroma.GetNumberOfFiducials()
+    if (numberOfPoints > 0):
+      self.tumorMarkupsDeleteLastButton.setEnabled(True)
+      self.tumorMarkupsDeleteAllButton.setEnabled(True)
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.seromaMarkups_Seroma.GetID())
+    self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.seromaModel_Seroma.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
 
-  def updateChestwallModel(self, observer, eventid):
-    logging.debug('updateChestwallModel')
+  def onChestwallMarkupsModified(self, observer, eventid):
+    logging.debug('onChestwallMarkupsModified')
+    numberOfPoints = self.chestwallMarkups_Chest.GetNumberOfFiducials()
+    if (numberOfPoints > 0):
+      self.chestwallMarkupsDeleteLastButton.setEnabled(True)
+      self.chestwallMarkupsDeleteAllButton.setEnabled(True)
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveMarkupsNodeID(self.chestwallMarkups_Chest.GetID())
     self.MarkupsToModelClosedSurfaceNode.SetAndObserveModelNodeID(self.chestwallModel_Chest.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelClosedSurfaceNode)
@@ -1197,7 +1269,7 @@ class CathNavGuidelet(Guidelet):
     logging.debug('recordGuidePosition')
     matrixPlanToNeedle = vtk.vtkMatrix4x4()
     needleTransformNode = self.needleToChest
-    gridTransformNode = self.guideCameraToGuideModel # we take a snapshot of the guide's position
+    gridTransformNode = self.guideCameraToGuideShaft # we take a snapshot of the guide's position
     gridTransformNode.GetMatrixTransformToNode(needleTransformNode,matrixPlanToNeedle)
     self.planToNeedle.SetMatrixTransformToParent(matrixPlanToNeedle)
     # =========== PLANNING PANEL FUNCTIONS ============
@@ -1379,7 +1451,7 @@ class CathNavGuidelet(Guidelet):
     logging.debug("onGuidewireCameraButtonClicked {0}".format(self.guidewireCameraButton.isChecked()))
     if (self.guidewireCameraButton.isChecked() == True):
       self.setEnableGuidewireCameraControls(True)
-      self.enableViewpoint(self.guideCameraToGuideModel)
+      self.enableViewpoint(self.guideCameraToGuideShaft)
     else:
       self.setEnableGuidewireCameraControls(False)
       self.disableViewpoint()
@@ -1435,9 +1507,9 @@ class CathNavGuidelet(Guidelet):
   
   def startPointCollection(self):
     logging.debug('startPointCollection')
-    self.wirePoints_Needle.RemoveAllMarkups()
+    self.wirePoints_Seroma.RemoveAllMarkups()
     self.wireToNeedleObserver = self.observeTransformNode(self.wireToNeedle, self.wireToNeedleObserver, self.collectWirePointInNeedleCoordinates)
-    self.wirePoints_NeedleObserver = self.observeMarkupsNode(self.wirePoints_Needle, self.wirePoints_NeedleObserver, self.reconstructCatheterPathOnThread)
+    self.wirePoints_SeromaObserver = self.observeMarkupsNode(self.wirePoints_Seroma, self.wirePoints_SeromaObserver, self.reconstructCatheterPathOnThread)
     self.pathCount = self.pathCount + 1
     logging.debug('startPointCollection end')
     
@@ -1447,26 +1519,26 @@ class CathNavGuidelet(Guidelet):
       self.wireToNeedle.RemoveObserver(self.wireToNeedleObserver)
       self.wireToNeedleObserver = None
     # Stop reconstruction on update
-    if self.wirePoints_Needle and self.wirePoints_NeedleObserver:
-      self.wirePoints_Needle.RemoveObserver(self.wirePoints_NeedleObserver)
-      self.wirePoints_NeedleObserver = None
+    if self.wirePoints_Seroma and self.wirePoints_SeromaObserver:
+      self.wirePoints_Seroma.RemoveObserver(self.wirePoints_SeromaObserver)
+      self.wirePoints_SeromaObserver = None
     
     # Create a copy of the list for data storage purposes
     if self.reconstructionThread:
       while self.reconstructionThread.isAlive():
         pass # wait until the thread terminates? TODO: Ask Andras if there is a safer way
     # Do one final reconstruction
-    markupsNode = self.wirePoints_Needle
+    markupsNode = self.wirePoints_Seroma
     self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode.GetID())
     modelNode = self.getCatheterModelForPathNumber(self.pathCount)
     self.MarkupsToModelCurveNode.SetAndObserveModelNodeID(modelNode.GetID())
     self.MarkupsToModelLogic.UpdateOutputModel(self.MarkupsToModelCurveNode)
     
     # create a copy of the markups for analysis purposes
-    storeRawFiducialsListName = 'WirePoints_Needle_RawPath' + str(self.pathCount)
+    storeRawFiducialsListName = 'wirePoints_Seroma_RawPath' + str(self.pathCount)
     storeRawFiducialsList = self.initializeFiducialList(storeRawFiducialsListName)
-    self.copyFiducialsFromListToList(self.wirePoints_Needle,storeRawFiducialsList)
-    self.wirePoints_Needle.RemoveAllMarkups()
+    self.copyFiducialsFromListToList(self.wirePoints_Seroma,storeRawFiducialsList)
+    self.wirePoints_Seroma.RemoveAllMarkups()
     
   def collectWirePointInNeedleCoordinates(self, observer, eventid):
     logging.debug('collectWirePointInNeedleCoordinates')
@@ -1475,13 +1547,13 @@ class CathNavGuidelet(Guidelet):
     pointCoordinates[0] = matrix.GetElement(0, 3)
     pointCoordinates[1] = matrix.GetElement(1, 3)
     pointCoordinates[2] = matrix.GetElement(2, 3)
-    self.wirePoints_Needle.AddFiducialFromArray(pointCoordinates)
+    self.wirePoints_Seroma.AddFiducialFromArray(pointCoordinates)
   
   def reconstructCatheterPathOnThread(self, observer, eventid):
     if self.reconstructionThread:
       if self.reconstructionThread.isAlive():
         return
-    markupsNode = self.wirePoints_Needle
+    markupsNode = self.wirePoints_Seroma
     if markupsNode.GetNumberOfFiducials() <= 10:
       return
     self.MarkupsToModelCurveNode.SetAndObserveMarkupsNodeID(markupsNode.GetID())
